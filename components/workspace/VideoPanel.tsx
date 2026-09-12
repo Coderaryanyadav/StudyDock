@@ -123,11 +123,11 @@ export const VideoPanel: React.FC<VideoPanelProps> = ({
             <Youtube className="w-3.5 h-3.5" />
           </div>
           <div className="flex items-center gap-2 truncate">
-            <span className="font-semibold text-white truncate max-w-[200px] md:max-w-[280px]">
+            <span data-testid="video-lecture-title" className="font-semibold text-white truncate max-w-[200px] md:max-w-[280px]">
               {video ? video.title : "Linked Video Lecture"}
             </span>
             {video?.channelName && (
-              <span className="text-[11px] text-slate-400 hidden sm:inline truncate">
+              <span data-testid="video-channel-name" className="text-[11px] text-slate-400 hidden sm:inline truncate">
                 • {video.channelName}
               </span>
             )}
@@ -142,9 +142,12 @@ export const VideoPanel: React.FC<VideoPanelProps> = ({
               {video.transcript && video.transcript.length > 0 ? (
                 <button
                   onClick={() => setShowTranscriptDrawer(!showTranscriptDrawer)}
-                  className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                  aria-label="Toggle Video Transcript Drawer"
+                  aria-expanded={showTranscriptDrawer}
+                  data-testid="video-transcript-btn"
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none ${
                     showTranscriptDrawer
-                      ? "bg-indigo-600 text-white"
+                      ? "bg-indigo-600 text-white shadow-sm"
                       : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20"
                   }`}
                 >
@@ -153,15 +156,17 @@ export const VideoPanel: React.FC<VideoPanelProps> = ({
                   <span className="font-mono">({video.transcript.length})</span>
                 </button>
               ) : (
-                <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-400 border border-slate-700/60">
-                  Transcript Unavailable
+                <span data-testid="video-no-transcript-badge" className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800/80 text-slate-400 border border-slate-700/60" title="Transcript unavailable for this video.">
+                  Transcript unavailable for this video.
                 </span>
               )}
 
               {/* Replace Video */}
               <button
                 onClick={() => setIsConnectModalOpen(true)}
-                className="px-2 py-0.5 rounded text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                aria-label="Replace YouTube Video URL"
+                data-testid="video-replace-btn"
+                className="px-2 py-0.5 rounded text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
                 title="Replace Video URL"
               >
                 Replace
@@ -170,7 +175,9 @@ export const VideoPanel: React.FC<VideoPanelProps> = ({
               {/* Unlink Video */}
               <button
                 onClick={handleDisconnectVideo}
-                className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                aria-label="Disconnect Video Lecture"
+                data-testid="video-disconnect-btn"
+                className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:outline-none"
                 title="Disconnect Video"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -182,7 +189,9 @@ export const VideoPanel: React.FC<VideoPanelProps> = ({
           {!video && (
             <button
               onClick={() => setIsConnectModalOpen(true)}
-              className="flex items-center gap-1 px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors"
+              aria-label="Connect YouTube Lecture"
+              data-testid="connect-lecture-btn"
+              className="flex items-center gap-1 px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Connect Lecture</span>
@@ -193,7 +202,9 @@ export const VideoPanel: React.FC<VideoPanelProps> = ({
           {onToggleCollapse && (
             <button
               onClick={onToggleCollapse}
-              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors ml-1"
+              aria-label={isCollapsed ? "Expand Video Panel" : "Collapse Video Panel"}
+              aria-expanded={!isCollapsed}
+              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors ml-1 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
               title={isCollapsed ? "Expand Video" : "Collapse Video"}
             >
               {isCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}

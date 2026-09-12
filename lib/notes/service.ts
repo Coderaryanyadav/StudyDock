@@ -1,12 +1,11 @@
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { Note } from "@/types";
 
 export async function getNotesForBook(
   userId: string,
   bookId: string
 ): Promise<Note[]> {
-  const supabase = (await createServerSupabaseClient()) || createAdminClient();
+  const supabase = await createServerSupabaseClient();
   if (!supabase || !userId || !bookId) return [];
 
   const { data: rows, error } = await supabase
@@ -38,7 +37,7 @@ export async function saveNote(
     content: string;
   }
 ): Promise<Note | null> {
-  const supabase = (await createServerSupabaseClient()) || createAdminClient();
+  const supabase = await createServerSupabaseClient();
   if (!supabase || !userId || !data.bookId || !data.content) return null;
 
   const { data: row, error } = await supabase
@@ -73,7 +72,7 @@ export async function updateNote(
   noteId: string,
   content: string
 ): Promise<Note | null> {
-  const supabase = (await createServerSupabaseClient()) || createAdminClient();
+  const supabase = await createServerSupabaseClient();
   if (!supabase || !userId || !noteId || !content) return null;
 
   const { data: row, error } = await supabase
@@ -104,7 +103,7 @@ export async function deleteNote(
   userId: string,
   noteId: string
 ): Promise<boolean> {
-  const supabase = (await createServerSupabaseClient()) || createAdminClient();
+  const supabase = await createServerSupabaseClient();
   if (!supabase || !userId || !noteId) return false;
 
   const { error } = await supabase

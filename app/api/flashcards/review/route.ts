@@ -4,6 +4,7 @@ import {
   getFlashcardsForBook,
   saveFlashcardReview,
 } from "@/lib/flashcards/service";
+import { recordStudyEvent } from "@/lib/progress/service";
 
 export async function GET(req: NextRequest) {
   try {
@@ -12,8 +13,12 @@ export async function GET(req: NextRequest) {
     const auth = await authenticateRequest(req);
     const userId = auth?.id;
 
-    if (!userId || !bookId) {
-      return NextResponse.json({ success: true, flashcards: [] });
+    if (!userId) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+
+    if (!bookId) {
+      return NextResponse.json({ error: "Book ID is required." }, { status: 400 });
     }
 
     const isOwner = await verifyBookOwnership(userId, bookId);
@@ -25,7 +30,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: true, flashcards });
   } catch (error: any) {
     console.error("Flashcards review GET error:", error?.message || error);
-    return NextResponse.json({ success: true, flashcards: [] });
+    return NextResponse.json({ error: "Failed to fetch flashcards." }, { status: 500 });
   }
 }
 
@@ -65,6 +70,12 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
+
+    // Log tracking event
+    await recordStudyEvent(userId, {
+      eventType: "flashcard_reviewed",
+      metadata: { flashcardId, status },
+    }).catch(() => {});
 
     return NextResponse.json({ success: true, flashcardId, status });
   } catch (error: any) {

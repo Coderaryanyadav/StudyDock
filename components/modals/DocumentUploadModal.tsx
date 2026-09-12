@@ -99,10 +99,12 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
 
         <form onSubmit={handleUpload} className="space-y-4">
           {/* Dropzone */}
-          <div className="border border-dashed border-slate-700 hover:border-indigo-500 rounded-lg p-6 text-center cursor-pointer transition-colors bg-[#070b12] relative">
+          <div className="border border-dashed border-slate-700 hover:border-indigo-500 rounded-lg p-6 text-center cursor-pointer transition-colors bg-[#070b12] relative focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500">
             <input
               type="file"
               accept=".pdf,application/pdf"
+              data-testid="pdf-dropzone-input"
+              aria-label="Upload PDF document"
               onChange={handleFileChange}
               className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
             />
@@ -112,7 +114,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
               </div>
               <div className="text-xs">
                 {file ? (
-                  <span className="font-semibold text-emerald-400">{file.name}</span>
+                  <span className="font-semibold text-emerald-400" data-testid="uploaded-file-name">{file.name}</span>
                 ) : (
                   <>
                     <span className="font-semibold text-white">Click to upload</span> or drag and drop
@@ -130,10 +132,12 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
               <input
                 type="text"
                 required
+                data-testid="import-title-input"
+                aria-label="Textbook Title"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="e.g., Operating Systems: Three Easy Pieces"
-                className="w-full px-3 py-2 rounded-lg bg-[#070b12] border border-slate-800 text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                className="w-full px-3 py-2 rounded-lg bg-[#070b12] border border-slate-800 text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-500"
               />
             </div>
 
@@ -141,10 +145,12 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
               <label className="text-slate-300 font-medium">Author(s)</label>
               <input
                 type="text"
+                data-testid="import-author-input"
+                aria-label="Author(s)"
                 value={author}
                 onChange={(e) => setAuthor(e.target.value)}
                 placeholder="e.g., Remzi Arpaci-Dusseau"
-                className="w-full px-3 py-2 rounded-lg bg-[#070b12] border border-slate-800 text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                className="w-full px-3 py-2 rounded-lg bg-[#070b12] border border-slate-800 text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-500"
               />
             </div>
 
@@ -152,23 +158,25 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
               <label className="text-slate-300 font-medium">Course / Subject</label>
               <input
                 type="text"
+                data-testid="import-subject-input"
+                aria-label="Course or Subject"
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
                 placeholder="e.g., Computer Systems"
-                className="w-full px-3 py-2 rounded-lg bg-[#070b12] border border-slate-800 text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                className="w-full px-3 py-2 rounded-lg bg-[#070b12] border border-slate-800 text-white placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-500"
               />
             </div>
           </div>
 
           {error && (
-            <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
+            <div data-testid="import-error-alert" className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
           )}
 
           {isUploading && (
-            <div className="p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs flex items-center gap-2">
+            <div data-testid="import-loading-state" className="p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs flex items-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
               <span>Extracting PDF text and generating vector chunks...</span>
             </div>
@@ -178,14 +186,16 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+              className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isUploading || !file}
-              className="px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold shadow-sm flex items-center gap-2"
+              data-testid="import-submit-btn"
+              aria-label="Import and Index Textbook PDF"
+              className="px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold shadow-sm flex items-center gap-2 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
             >
               {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
               <span>Import & Index</span>

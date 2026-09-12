@@ -44,7 +44,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           password,
         });
         if (signUpErr) throw signUpErr;
-        setSuccessMsg("Account created! Check your email to confirm your account or sign in.");
+        if (data.session) {
+          setSuccessMsg("Welcome to StudyDock!");
+          if (onAuthSuccess) onAuthSuccess(data.user?.email || email);
+          setTimeout(onClose, 500);
+        } else {
+          setSuccessMsg("Account created! You can now sign in.");
+        }
       } else {
         const { data, error: signInErr } = await supabase.auth.signInWithPassword({
           email,
@@ -53,7 +59,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         if (signInErr) throw signInErr;
         setSuccessMsg("Welcome back to StudyDock!");
         if (onAuthSuccess) onAuthSuccess(data.user?.email || email);
-        setTimeout(onClose, 600);
+        setTimeout(onClose, 500);
       }
     } catch (err: any) {
       setError(err?.message || "Authentication failed. Please check your credentials.");
@@ -99,6 +105,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               setError("");
               setSuccessMsg("");
             }}
+            data-testid="auth-tab-signin"
             className={`py-1.5 rounded-md transition-all ${
               mode === "signin"
                 ? "bg-indigo-600 text-white shadow-sm"
@@ -113,6 +120,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               setError("");
               setSuccessMsg("");
             }}
+            data-testid="auth-tab-signup"
             className={`py-1.5 rounded-md transition-all ${
               mode === "signup"
                 ? "bg-indigo-600 text-white shadow-sm"
@@ -125,14 +133,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Error / Success Alerts */}
         {error && (
-          <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
+          <div data-testid="auth-error-alert" className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
             <span>{error}</span>
           </div>
         )}
 
         {successMsg && (
-          <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-start gap-2">
+          <div data-testid="auth-success-alert" className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-start gap-2">
             <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
             <span>{successMsg}</span>
           </div>
@@ -147,6 +155,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <input
                 type="email"
                 required
+                data-testid="auth-email-input"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="student@university.edu"
@@ -163,6 +172,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 type="password"
                 required
                 minLength={6}
+                data-testid="auth-password-input"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
@@ -174,6 +184,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           <button
             type="submit"
             disabled={isLoading}
+            data-testid="auth-submit-btn"
             className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold text-xs transition-all shadow-sm flex items-center justify-center gap-2"
           >
             {isLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}

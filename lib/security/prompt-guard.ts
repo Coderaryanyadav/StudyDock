@@ -17,11 +17,11 @@ export function sanitizePromptText(input: string, maxLength = 8000): string {
   // Strip non-printable ASCII control characters except \n, \r, \t
   sanitized = sanitized.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
 
-  // Escape raw XML closing tags to prevent delimiter escape
+  // Escape raw XML tags and system boundary delimiters to prevent prompt boundary breakout
   sanitized = sanitized
-    .replace(/<\/untrusted_document_context>/gi, "&lt;/untrusted_document_context&gt;")
-    .replace(/<\/student_selected_text>/gi, "&lt;/student_selected_text&gt;")
-    .replace(/<\/student_question>/gi, "&lt;/student_question&gt;");
+    .replace(/<\/?(system|prompt|instruction|instructions|context|untrusted_document_context|student_selected_text|student_question)[^>]*>/gi, "[Filtered XML delimiter]")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 
   // Neutralize common instruction hijacking patterns
   const injectionPatterns = [
@@ -29,7 +29,7 @@ export function sanitizePromptText(input: string, maxLength = 8000): string {
     /disregard\s+(all\s+)?(previous|prior|above)\s+instructions/gi,
     /system\s+prompt\s+override/gi,
     /reveal\s+(your\s+)?(system\s+prompt|instructions|secret|api\s*key)/gi,
-    /you\s+are\s+now\s+in\s+(developer|unrestricted|god)\s+mode/gi,
+    /you\s+are\s+now\s+in\s+(developer|unrestricted|god|debug)\s+mode/gi,
     /output\s+the\s+initial\s+prompt/gi,
   ];
 

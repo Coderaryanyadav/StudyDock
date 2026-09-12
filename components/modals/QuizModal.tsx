@@ -8,16 +8,25 @@ import { renderMathInText } from "@/lib/katex-renderer";
 interface QuizModalProps {
   isOpen: boolean;
   onClose: () => void;
+  quizId?: string | null;
   questions: QuizQuestion[];
   bookTitle?: string;
   chapterTitle?: string;
   pageNumber?: number;
-  onFinishQuiz?: (score: number, total: number, concept?: string) => void;
+  onFinishQuiz?: (data: {
+    quizId?: string | null;
+    answers: { questionId: string; selectedOptionId: string }[];
+    startedAt: string;
+    completedAt: string;
+    timeSpentSeconds: number;
+    concept?: string;
+  }) => void;
 }
 
 export const QuizModal: React.FC<QuizModalProps> = ({
   isOpen,
   onClose,
+  quizId,
   questions,
   bookTitle,
   chapterTitle,
@@ -29,6 +38,21 @@ export const QuizModal: React.FC<QuizModalProps> = ({
   const [isAnswerSubmitted, setIsAnswerSubmitted] = useState<boolean>(false);
   const [score, setScore] = useState<number>(0);
   const [isCompleted, setIsCompleted] = useState<boolean>(false);
+  const [recordedAnswers, setRecordedAnswers] = useState<{ questionId: string; selectedOptionId: string }[]>([]);
+  const [startedAt, setStartedAt] = useState<string>(new Date().toISOString());
+
+  // Reset when modal opens
+  React.useEffect(() => {
+    if (isOpen) {
+      setCurrentIndex(0);
+      setSelectedOptionId(null);
+      setIsAnswerSubmitted(false);
+      setScore(0);
+      setIsCompleted(false);
+      setRecordedAnswers([]);
+      setStartedAt(new Date().toISOString());
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -40,8 +64,14 @@ export const QuizModal: React.FC<QuizModalProps> = ({
   };
 
   const handleSubmitAnswer = () => {
-    if (!selectedOptionId || isAnswerSubmitted) return;
+    if (!selectedOptionId || isAnswerSubmitted || !currentQuestion) return;
     setIsAnswerSubmitted(true);
+
+    const newAnswer = {
+      questionId: currentQuestion.id,
+      selectedOptionId,
+    };
+    setRecordedAnswers((prev) => [...prev, newAnswer]);
 
     const selectedOpt = currentQuestion.options.find((o) => o.id === selectedOptionId);
     if (selectedOpt?.isCorrect) {
@@ -56,9 +86,18 @@ export const QuizModal: React.FC<QuizModalProps> = ({
       setIsAnswerSubmitted(false);
     } else {
       setIsCompleted(true);
+      const completedAt = new Date().toISOString();
+      const timeSpentSeconds = Math.max(1, Math.round((new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 1000));
       if (onFinishQuiz) {
         const primaryConcept = questions[0]?.concept || "Core Concept";
-        onFinishQuiz(score, questions.length, primaryConcept);
+        onFinishQuiz({
+          quizId,
+          answers: recordedAnswers,
+          startedAt,
+          completedAt,
+          timeSpentSeconds,
+          concept: primaryConcept,
+        });
       }
     }
   };
@@ -69,10 +108,12 @@ export const QuizModal: React.FC<QuizModalProps> = ({
     setIsAnswerSubmitted(false);
     setScore(0);
     setIsCompleted(false);
+    setRecordedAnswers([]);
+    setStartedAt(new Date().toISOString());
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+    <div data-testid="quiz-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
       <div className="w-full max-w-xl bg-[#0d131f] border border-slate-800 rounded-xl p-6 md:p-8 shadow-2xl space-y-6 text-slate-100 relative">
         
         {/* Header */}
@@ -90,6 +131,8 @@ export const QuizModal: React.FC<QuizModalProps> = ({
           </div>
           <button
             onClick={onClose}
+            aria-label="Close Quiz"
+            data-testid="quiz-close-btn"
             className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
           >
             <X className="w-5 h-5" />
@@ -100,8 +143,8 @@ export const QuizModal: React.FC<QuizModalProps> = ({
           <div className="space-y-5">
             {/* Progress indicator */}
             <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
-              <span>Question {currentIndex + 1} of {questions.length}</span>
-              <span>Score: {score}/{currentIndex + (isAnswerSubmitted ? 1 : 0)}</span>
+              <span data-testid="quiz-progress-indicator">Question {currentIndex + 1} of {questions.length}</span>
+              <span data-testid="quiz-live-score">Score: {score}/{currentIndex + (isAnswerSubmitted ? 1 : 0)}</span>
             </div>
 
             <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
@@ -112,13 +155,13 @@ export const QuizModal: React.FC<QuizModalProps> = ({
             </div>
 
             {/* Question prompt */}
-            <div className="text-sm md:text-base font-semibold text-white leading-relaxed">
+            <div data-testid="quiz-question-prompt" className="text-sm md:text-base font-semibold text-white leading-relaxed">
               {renderMathInText(currentQuestion?.question || "Loading question...")}
             </div>
 
             {/* Options list */}
-            <div className="space-y-2.5">
-              {currentQuestion?.options.map((opt) => {
+            <div className="space-y-2.5" role="radiogroup" aria-label="Quiz Answer Options">
+              {currentQuestion?.options.map((opt, oIdx) => {
                 const isSelected = selectedOptionId === opt.id;
                 let optStyle = "bg-[#070b12] border-slate-800 text-slate-300 hover:border-slate-700";
 
@@ -137,9 +180,12 @@ export const QuizModal: React.FC<QuizModalProps> = ({
                 return (
                   <button
                     key={opt.id}
+                    role="radio"
+                    aria-checked={isSelected}
+                    data-testid={`quiz-option-${oIdx}`}
                     onClick={() => handleSelectOption(opt.id)}
                     disabled={isAnswerSubmitted}
-                    className={`w-full text-left p-3.5 rounded-lg border transition-all flex items-center justify-between text-xs md:text-sm ${optStyle}`}
+                    className={`w-full text-left p-3.5 rounded-lg border transition-all flex items-center justify-between text-xs md:text-sm focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none ${optStyle}`}
                   >
                     <span>{renderMathInText(opt.text)}</span>
                     {isAnswerSubmitted && opt.isCorrect && (
@@ -152,7 +198,7 @@ export const QuizModal: React.FC<QuizModalProps> = ({
 
             {/* Explanation box */}
             {isAnswerSubmitted && currentQuestion?.explanation && (
-              <div className="p-3.5 rounded-lg bg-[#070b12] border border-slate-800 text-xs text-slate-300 space-y-1">
+              <div data-testid="quiz-explanation-box" className="p-3.5 rounded-lg bg-[#070b12] border border-slate-800 text-xs text-slate-300 space-y-1">
                 <span className="font-semibold text-indigo-400 uppercase tracking-wider text-[10px]">Explanation:</span>
                 <p className="leading-relaxed">{renderMathInText(currentQuestion.explanation)}</p>
               </div>
@@ -164,14 +210,18 @@ export const QuizModal: React.FC<QuizModalProps> = ({
                 <button
                   onClick={handleSubmitAnswer}
                   disabled={!selectedOptionId}
-                  className="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-semibold text-xs transition-colors shadow-sm"
+                  aria-label="Submit Answer"
+                  data-testid="quiz-submit-answer-btn"
+                  className="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-semibold text-xs transition-colors shadow-sm focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
                 >
                   Submit Answer
                 </button>
               ) : (
                 <button
                   onClick={handleNextQuestion}
-                  className="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition-colors flex items-center gap-1.5 shadow-sm"
+                  aria-label={currentIndex + 1 < questions.length ? "Next Question" : "View Results"}
+                  data-testid="quiz-next-question-btn"
+                  className="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition-colors flex items-center gap-1.5 shadow-sm focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
                 >
                   <span>{currentIndex + 1 < questions.length ? "Next Question" : "View Results"}</span>
                   <ArrowRight className="w-4 h-4" />
@@ -181,14 +231,14 @@ export const QuizModal: React.FC<QuizModalProps> = ({
           </div>
         ) : (
           /* Completed Result Screen */
-          <div className="py-6 text-center space-y-5">
+          <div data-testid="quiz-completed-screen" className="py-6 text-center space-y-5">
             <div className="w-14 h-14 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center mx-auto">
               <Trophy className="w-7 h-7" />
             </div>
 
             <div className="space-y-1">
               <h4 className="text-xl font-bold text-white">Quiz Completed</h4>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-400" data-testid="quiz-final-score-display">
                 You scored <strong className="text-indigo-400 font-bold">{score} out of {questions.length}</strong> ({Math.round((score / questions.length) * 100)}%)
               </p>
             </div>
@@ -196,7 +246,9 @@ export const QuizModal: React.FC<QuizModalProps> = ({
             <div className="flex items-center justify-center gap-3 pt-2">
               <button
                 onClick={handleResetQuiz}
-                className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors flex items-center gap-1.5"
+                aria-label="Retry Quiz"
+                data-testid="quiz-retry-btn"
+                className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors flex items-center gap-1.5 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>Retry Quiz</span>
@@ -204,7 +256,9 @@ export const QuizModal: React.FC<QuizModalProps> = ({
 
               <button
                 onClick={onClose}
-                className="px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors"
+                aria-label="Return to Workspace"
+                data-testid="quiz-return-btn"
+                className="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
               >
                 Return to Workspace
               </button>

@@ -119,7 +119,7 @@ CREATE INDEX IF NOT EXISTS book_chunks_embedding_idx ON book_chunks USING hnsw (
 CREATE INDEX IF NOT EXISTS book_chunks_book_page_idx ON book_chunks (book_id, page_number);
 
 -- ------------------------------------------------------------------------------
--- VIDEOS & LECTURE TOPIC TIMESTAMPS
+-- VIDEOS & LECTURE TOPIC TIMESTAMPS / SEGMENTS
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS videos (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -130,6 +130,16 @@ CREATE TABLE IF NOT EXISTS videos (
     channel_name TEXT,
     duration_seconds INT DEFAULT 0,
     formatted_duration TEXT DEFAULT '00:00',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS video_segments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    video_id UUID NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    timestamp_seconds INT NOT NULL,
+    formatted_time TEXT NOT NULL,
+    title TEXT,
+    content TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -152,6 +162,23 @@ CREATE TABLE IF NOT EXISTS video_transcripts (
     text TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Relational hierarchy indexes
+CREATE INDEX IF NOT EXISTS idx_chapters_book_id ON chapters(book_id);
+CREATE INDEX IF NOT EXISTS idx_chapters_book_number ON chapters(book_id, number);
+CREATE INDEX IF NOT EXISTS idx_sections_chapter_id ON sections(chapter_id);
+CREATE INDEX IF NOT EXISTS idx_sections_page_number ON sections(page_number);
+CREATE INDEX IF NOT EXISTS idx_book_pages_book_id ON book_pages(book_id);
+CREATE INDEX IF NOT EXISTS idx_book_pages_chapter_id ON book_pages(chapter_id);
+CREATE INDEX IF NOT EXISTS idx_book_pages_section_id ON book_pages(section_id);
+CREATE INDEX IF NOT EXISTS idx_book_pages_book_page ON book_pages(book_id, page_number);
+CREATE INDEX IF NOT EXISTS idx_book_chunks_book_id ON book_chunks(book_id);
+CREATE INDEX IF NOT EXISTS idx_book_chunks_page_id ON book_chunks(page_id);
+CREATE INDEX IF NOT EXISTS idx_videos_user_id ON videos(user_id);
+CREATE INDEX IF NOT EXISTS idx_videos_book_id ON videos(book_id);
+CREATE INDEX IF NOT EXISTS idx_video_segments_video_id ON video_segments(video_id);
+CREATE INDEX IF NOT EXISTS idx_video_topics_video_id ON video_topics(video_id);
+CREATE INDEX IF NOT EXISTS idx_video_transcripts_video_id ON video_transcripts(video_id);
 
 -- ------------------------------------------------------------------------------
 -- CONVERSATIONS & CHAT MESSAGES
@@ -179,13 +206,21 @@ CREATE TABLE IF NOT EXISTS message_citations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     chunk_id UUID REFERENCES book_chunks(id) ON DELETE SET NULL,
+    source_type TEXT DEFAULT 'textbook',
     book_title TEXT NOT NULL,
     chapter_title TEXT,
     section_title TEXT,
     page_number INT NOT NULL,
+    video_timestamp_seconds INT,
+    video_formatted_time TEXT,
     excerpt TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_conversations_user_book ON conversations(user_id, book_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_message_citations_msg ON message_citations(message_id);
 
 -- ------------------------------------------------------------------------------
 -- ANNOTATIONS: HIGHLIGHTS & BOOKMARKS
@@ -200,7 +235,8 @@ CREATE TABLE IF NOT EXISTS highlights (
     note TEXT,
     bounding_rect JSONB,
     rects JSONB,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS bookmarks (
@@ -210,6 +246,7 @@ CREATE TABLE IF NOT EXISTS bookmarks (
     page_number INT NOT NULL,
     title TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT unique_user_bookmark UNIQUE(user_id, book_id, page_number)
 );
 
@@ -224,6 +261,14 @@ CREATE TABLE IF NOT EXISTS notes (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Annotation relational and composite indexes
+CREATE INDEX IF NOT EXISTS idx_highlights_user_book ON highlights(user_id, book_id);
+CREATE INDEX IF NOT EXISTS idx_highlights_book_page ON highlights(book_id, page_number);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_user_book ON bookmarks(user_id, book_id);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_book_page ON bookmarks(book_id, page_number);
+CREATE INDEX IF NOT EXISTS idx_notes_user_book ON notes(user_id, book_id);
+CREATE INDEX IF NOT EXISTS idx_notes_book_page ON notes(book_id, page_number);
+
 -- ------------------------------------------------------------------------------
 -- FLASHCARDS & SPACED REPETITION
 -- ------------------------------------------------------------------------------
@@ -237,8 +282,14 @@ CREATE TABLE IF NOT EXISTS flashcards (
     answer TEXT NOT NULL,
     status TEXT DEFAULT 'unseen' CHECK (status IN ('unseen', 'learning', 'mastered')),
     last_reviewed TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Flashcard relational and status indexes
+CREATE INDEX IF NOT EXISTS idx_flashcards_user_book ON flashcards(user_id, book_id);
+CREATE INDEX IF NOT EXISTS idx_flashcards_book_page ON flashcards(book_id, page_number);
+CREATE INDEX IF NOT EXISTS idx_flashcards_user_status ON flashcards(user_id, status);
 
 -- ------------------------------------------------------------------------------
 -- QUIZZES & ASSESSMENT ATTEMPTS
@@ -268,11 +319,21 @@ CREATE TABLE IF NOT EXISTS quiz_questions (
 CREATE TABLE IF NOT EXISTS quiz_attempts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    book_id UUID REFERENCES books(id) ON DELETE CASCADE,
     quiz_id UUID NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
     score INT NOT NULL,
     total_questions INT NOT NULL,
-    completed_at TIMESTAMPTZ DEFAULT NOW()
+    answers JSONB, -- Array of { questionId, selectedOptionId, isCorrect }
+    started_at TIMESTAMPTZ DEFAULT NOW(),
+    completed_at TIMESTAMPTZ DEFAULT NOW(),
+    time_spent INT DEFAULT 0
 );
+
+-- Quiz relational and attempt indexes
+CREATE INDEX IF NOT EXISTS idx_quizzes_user_book ON quizzes(user_id, book_id);
+CREATE INDEX IF NOT EXISTS idx_quiz_questions_quiz_id ON quiz_questions(quiz_id);
+CREATE INDEX IF NOT EXISTS idx_quiz_attempts_user_quiz ON quiz_attempts(user_id, quiz_id);
+CREATE INDEX IF NOT EXISTS idx_quiz_attempts_user_book ON quiz_attempts(user_id, book_id);
 
 -- ------------------------------------------------------------------------------
 -- CONCEPTS & STUDENT MASTERY RADAR
@@ -298,18 +359,48 @@ CREATE TABLE IF NOT EXISTS student_concepts (
 );
 
 -- ------------------------------------------------------------------------------
--- STUDY SESSIONS & PROGRESS
+-- STUDY SESSIONS, EVENTS & REAL-TIME ANALYTICS
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS study_sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-    book_id UUID REFERENCES books(id) ON DELETE SET NULL,
+    book_id UUID REFERENCES books(id) ON DELETE CASCADE,
     started_at TIMESTAMPTZ DEFAULT NOW(),
     ended_at TIMESTAMPTZ,
     duration_minutes INT DEFAULT 0,
+    duration_seconds INT DEFAULT 0,
     pages_read INT DEFAULT 0,
+    pages_viewed INT[] DEFAULT '{}',
+    pages_completed INT[] DEFAULT '{}',
     video_time_seconds INT DEFAULT 0,
     questions_asked INT DEFAULT 0,
+    activity_type TEXT DEFAULT 'reading',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS study_events (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    book_id UUID REFERENCES books(id) ON DELETE CASCADE,
+    session_id UUID REFERENCES study_sessions(id) ON DELETE SET NULL,
+    event_type TEXT NOT NULL CHECK (event_type IN (
+        'page_opened',
+        'page_time',
+        'page_completed',
+        'highlight_created',
+        'note_created',
+        'bookmark_created',
+        'video_started',
+        'video_watched',
+        'question_asked',
+        'quiz_started',
+        'quiz_completed',
+        'flashcard_reviewed'
+    )),
+    page_number INT,
+    duration_seconds INT DEFAULT 0,
+    metadata JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -325,6 +416,15 @@ CREATE TABLE IF NOT EXISTS student_progress (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Analytics & Session relational indexes
+CREATE INDEX IF NOT EXISTS idx_study_events_user_book ON study_events(user_id, book_id);
+CREATE INDEX IF NOT EXISTS idx_study_events_user_type ON study_events(user_id, event_type);
+CREATE INDEX IF NOT EXISTS idx_study_events_created ON study_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_study_events_user_date ON study_events(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_study_events_session ON study_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_study_sessions_user_book ON study_sessions(user_id, book_id);
+CREATE INDEX IF NOT EXISTS idx_study_sessions_started ON study_sessions(user_id, started_at DESC);
+
 -- ==============================================================================
 -- PGVECTOR COSINE SIMILARITY SEARCH FUNCTION
 -- ==============================================================================
@@ -332,12 +432,12 @@ CREATE OR REPLACE FUNCTION match_book_chunks (
     query_embedding vector(768),
     match_threshold float,
     match_count int,
-    filter_book_id uuid,
-    filter_user_id uuid DEFAULT NULL
+    filter_book_id uuid
 )
 RETURNS TABLE (
     id uuid,
     book_id uuid,
+    page_id uuid,
     chunk_index int,
     page_number int,
     chapter_title text,
@@ -353,9 +453,8 @@ AS $$
 DECLARE
     current_uid uuid;
 BEGIN
-    -- Authoritative identity: Use auth.uid() when invoked from authenticated context,
-    -- or validate filter_user_id against book ownership
-    current_uid := COALESCE(auth.uid(), filter_user_id);
+    -- Derive authoritative user identity from current auth session
+    current_uid := auth.uid();
     
     IF current_uid IS NULL THEN
         RAISE EXCEPTION 'Authentication required for vector retrieval';
@@ -365,15 +464,19 @@ BEGIN
     SELECT
         bc.id,
         bc.book_id,
+        bc.page_id,
         bc.chunk_index,
         bc.page_number,
-        bc.chapter_title,
-        bc.section_title,
+        COALESCE(c.title, bc.chapter_title) AS chapter_title,
+        COALESCE(s.title, bc.section_title) AS section_title,
         bc.text,
         bc.key_terms,
         (1 - (bc.embedding <=> query_embedding))::float AS similarity
-    FROM book_chunks bc
-    INNER JOIN books b ON b.id = bc.book_id
+    FROM public.book_chunks bc
+    INNER JOIN public.books b ON b.id = bc.book_id
+    LEFT JOIN public.book_pages bp ON bp.id = bc.page_id
+    LEFT JOIN public.chapters c ON c.id = bp.chapter_id
+    LEFT JOIN public.sections s ON s.id = bp.section_id
     WHERE b.user_id = current_uid
       AND (filter_book_id IS NULL OR bc.book_id = filter_book_id)
       AND (1 - (bc.embedding <=> query_embedding)) >= match_threshold
@@ -382,9 +485,9 @@ BEGIN
 END;
 $$;
 
--- Revoke function execution from public and anon, grant only to authenticated role
-REVOKE EXECUTE ON FUNCTION match_book_chunks(vector, float, int, uuid, uuid) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION match_book_chunks(vector, float, int, uuid, uuid) TO authenticated;
+-- Revoke execute from public and anon, grant strictly to authenticated users
+REVOKE ALL ON FUNCTION match_book_chunks(vector, float, int, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION match_book_chunks(vector, float, int, uuid) TO authenticated;
 
 -- ==============================================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
@@ -397,6 +500,7 @@ ALTER TABLE sections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE book_pages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE book_chunks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE videos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE video_segments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE video_topics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE video_transcripts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
@@ -411,6 +515,7 @@ ALTER TABLE quiz_questions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE quiz_attempts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE student_concepts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE study_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE study_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE student_progress ENABLE ROW LEVEL SECURITY;
 
 -- Profiles: users can read/update their own profile
@@ -460,6 +565,11 @@ CREATE POLICY "Users can access own videos" ON videos
     FOR ALL TO authenticated
     USING (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can access segments of own videos" ON video_segments
+    FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM videos WHERE videos.id = video_segments.video_id AND videos.user_id = auth.uid()))
+    WITH CHECK (EXISTS (SELECT 1 FROM videos WHERE videos.id = video_segments.video_id AND videos.user_id = auth.uid()));
 
 CREATE POLICY "Users can access topics of own videos" ON video_topics
     FOR ALL TO authenticated
@@ -540,6 +650,11 @@ CREATE POLICY "Users can access own concept mastery" ON student_concepts
     WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Users can access own study sessions" ON study_sessions
+    FOR ALL TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can access own study events" ON study_events
     FOR ALL TO authenticated
     USING (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);

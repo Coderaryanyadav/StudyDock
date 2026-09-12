@@ -22,6 +22,7 @@ export interface LearningModeConfig {
 export interface BookChunk {
   id: string;
   bookId: string;
+  pageId?: string | null;
   chapterId?: string | null;
   chapterTitle?: string | null;
   sectionId?: string | null;
@@ -32,6 +33,8 @@ export interface BookChunk {
 }
 
 export interface BookPage {
+  id?: string;
+  bookId?: string;
   pageNumber: number;
   chapterId?: string | null;
   chapterTitle?: string | null;
@@ -44,28 +47,51 @@ export interface BookPage {
   equations?: string[];
 }
 
+export interface Section {
+  id: string;
+  chapterId?: string;
+  number: string;
+  title: string;
+  page: number;
+  pageNumber?: number;
+}
+
 export interface Chapter {
   id: string;
+  bookId?: string;
   number: number;
   title: string;
   startPage: number;
   endPage: number;
-  sections: {
-    id: string;
-    number: string;
-    title: string;
-    page: number;
-  }[];
+  sections: Section[];
+}
+
+export interface VideoSegment {
+  id: string;
+  videoId: string;
+  timestampSeconds: number;
+  formattedTime: string;
+  title?: string | null;
+  content: string;
 }
 
 export interface Book {
   id: string;
+  userId?: string;
+  user_id?: string;
   title: string;
   author: string;
   edition: string;
   subject: string;
   totalPages: number;
   coverImage?: string;
+  storagePath?: string;
+  fileSizeBytes?: number;
+  status?: string;
+  statusMessage?: string;
+  lastPageRead?: number;
+  youtubeUrl?: string;
+  videoTitle?: string;
   chapters: Chapter[];
   pages: BookPage[];
   chunks: BookChunk[];
@@ -85,6 +111,7 @@ export interface Highlight {
   text: string;
   color: "yellow" | "blue" | "green" | "pink";
   createdAt: string;
+  updatedAt?: string;
   note?: string;
   boundingRect?: HighlightRect | null;
   rects?: HighlightRect[];
@@ -96,6 +123,7 @@ export interface Bookmark {
   pageNumber: number;
   title: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface Note {
@@ -112,7 +140,7 @@ export interface VideoTopic {
   timestampSeconds: number;
   formattedTime: string;
   title: string;
-  chapterId: string;
+  chapterId?: string | null;
   pageNumber: number;
   summary: string;
 }
@@ -171,13 +199,15 @@ export interface ChatMessage {
 export interface Flashcard {
   id: string;
   bookId: string;
-  chapterId: string;
+  chapterId?: string | null;
   pageNumber: number;
   concept: string;
   question: string;
   answer: string;
   status: "unseen" | "learning" | "mastered";
   lastReviewed?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface QuizOption {
@@ -189,13 +219,32 @@ export interface QuizOption {
 export interface QuizQuestion {
   id: string;
   bookId: string;
-  chapterId: string;
+  chapterId?: string | null;
   pageNumber: number;
   concept: string;
   question: string;
   options: QuizOption[];
   explanation: string;
   difficulty: "easy" | "medium" | "hard";
+}
+
+export interface QuizAttemptAnswer {
+  questionId: string;
+  selectedOptionId: string;
+  isCorrect?: boolean;
+}
+
+export interface QuizAttempt {
+  id: string;
+  userId: string;
+  bookId?: string;
+  quizId: string;
+  score: number;
+  totalQuestions: number;
+  answers?: QuizAttemptAnswer[];
+  startedAt: string;
+  completedAt: string;
+  timeSpent: number;
 }
 
 export interface ConceptMastery {
@@ -219,14 +268,71 @@ export interface StudyPlanItem {
   estimatedMinutes: number;
 }
 
+export type StudyEventType =
+  | "page_opened"
+  | "page_time"
+  | "page_completed"
+  | "highlight_created"
+  | "note_created"
+  | "bookmark_created"
+  | "video_started"
+  | "video_watched"
+  | "question_asked"
+  | "quiz_started"
+  | "quiz_completed"
+  | "flashcard_reviewed";
+
+export interface StudyEvent {
+  id: string;
+  userId: string;
+  bookId?: string | null;
+  sessionId?: string | null;
+  eventType: StudyEventType;
+  pageNumber?: number | null;
+  durationSeconds: number;
+  metadata?: Record<string, any>;
+  createdAt: string;
+}
+
+export interface StudySession {
+  id: string;
+  userId: string;
+  bookId?: string | null;
+  startedAt: string;
+  endedAt?: string | null;
+  durationSeconds: number;
+  durationMinutes: number;
+  pagesRead: number;
+  pagesViewed: number[];
+  pagesCompleted: number[];
+  videoTimeSeconds: number;
+  questionsAsked: number;
+  activityType: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface StudentProgress {
   totalStudyMinutes: number;
+  totalStudySeconds?: number;
   streakDays: number;
+  longestStreakDays?: number;
   chaptersCompleted: number;
   videosWatched: number;
   quizzesCompleted: number;
   questionsAsked: number;
+  flashcardsReviewed?: number;
+  pagesRead?: number;
+  bookProgressPercentage?: number;
   activeSubject: string;
   concepts: ConceptMastery[];
   todayPlan: StudyPlanItem[];
+  recentActivity?: {
+    id?: string;
+    eventType: StudyEventType | string;
+    title: string;
+    timestamp: string;
+    pageNumber?: number;
+    durationSeconds?: number;
+  }[];
 }

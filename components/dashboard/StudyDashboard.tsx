@@ -17,6 +17,11 @@ import {
   Plus,
   Compass,
   TrendingUp,
+  RotateCcw,
+  Activity,
+  Loader2,
+  AlertCircle,
+  FolderOpen,
 } from "lucide-react";
 import { StudentProgress, StudyPlanItem } from "@/types";
 
@@ -42,37 +47,64 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
   const [userBooks, setUserBooks] = useState<any[]>([]);
   const [userName, setUserName] = useState<string>("Scholar");
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  const fetchDashboardData = async () => {
+    setIsLoading(true);
+    setFetchError(null);
+
+    try {
+      const [progRes, booksRes] = await Promise.all([
+        fetch("/api/progress"),
+        fetch("/api/books"),
+      ]);
+
+      const [progData, booksData] = await Promise.all([
+        progRes.json().catch(() => ({})),
+        booksRes.json().catch(() => ({})),
+      ]);
+
+      if (progRes.ok && progData.authenticated) {
+        setProgress({
+          totalStudyMinutes: progData.totalStudyMinutes ?? 0,
+          totalStudySeconds: progData.totalStudySeconds ?? 0,
+          streakDays: progData.streakDays ?? 0,
+          longestStreakDays: progData.longestStreakDays ?? 0,
+          chaptersCompleted: progData.chaptersCompleted ?? 0,
+          videosWatched: progData.videosWatched ?? 0,
+          quizzesCompleted: progData.quizzesCompleted ?? 0,
+          questionsAsked: progData.questionsAsked ?? 0,
+          flashcardsReviewed: progData.flashcardsReviewed ?? 0,
+          pagesRead: progData.pagesRead ?? 0,
+          bookProgressPercentage: progData.bookProgressPercentage ?? 0,
+          activeSubject: progData.activeSubject || "Computer Science",
+          concepts: progData.concepts || [],
+          todayPlan: progData.todayPlan || [],
+          recentActivity: progData.recentActivity || [],
+        });
+
+        if (progData.todayPlan) {
+          setTodayPlan(progData.todayPlan);
+        }
+
+        if (progData.user?.displayName) {
+          setUserName(progData.user.displayName);
+        }
+      }
+
+      if (booksRes.ok && booksData.success && Array.isArray(booksData.books)) {
+        setUserBooks(booksData.books);
+      }
+    } catch (err: any) {
+      console.error("Dashboard fetch error:", err);
+      setFetchError("Unable to load latest study metrics from the database.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    // Fetch live progress from database
-    Promise.all([
-      fetch("/api/progress")
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.authenticated) {
-            setProgress((prev) => ({
-              ...prev,
-              totalStudyMinutes: data.totalStudyMinutes ?? prev.totalStudyMinutes,
-              streakDays: data.streakDays ?? prev.streakDays,
-              questionsAsked: data.questionsAsked ?? prev.questionsAsked,
-              quizzesCompleted: data.quizzesCompleted ?? prev.quizzesCompleted,
-              concepts: data.concepts?.length > 0 ? data.concepts : prev.concepts,
-            }));
-          }
-        })
-        .catch(() => {}),
-
-      fetch("/api/books")
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.success && data.books) {
-            setUserBooks(data.books);
-          }
-        })
-        .catch(() => {}),
-    ]).finally(() => {
-      setIsLoading(false);
-    });
+    fetchDashboardData();
   }, []);
 
   const togglePlanItem = (id: string) => {
@@ -94,10 +126,43 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
     return remainingMins > 0 ? `${hours}h ${remainingMins}m` : `${hours}h`;
   };
 
+  const formatTimeAgo = (isoString?: string) => {
+    if (!isoString) return "";
+    try {
+      const diffMs = Date.now() - new Date(isoString).getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      if (diffMins < 1) return "Just now";
+      if (diffMins < 60) return `${diffMins}m ago`;
+      const diffHours = Math.floor(diffMins / 60);
+      if (diffHours < 24) return `${diffHours}h ago`;
+      const diffDays = Math.floor(diffHours / 24);
+      return `${diffDays}d ago`;
+    } catch {
+      return "";
+    }
+  };
+
   return (
     <div className="flex-1 overflow-y-auto bg-[#080c14] text-slate-100 p-5 md:p-10 custom-scrollbar">
       <div className="max-w-6xl mx-auto space-y-8">
         
+        {/* Error Alert Banner */}
+        {fetchError && (
+          <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-between text-rose-300">
+            <div className="flex items-center gap-2.5">
+              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+              <span className="text-xs font-medium">{fetchError}</span>
+            </div>
+            <button
+              onClick={fetchDashboardData}
+              className="px-3 py-1 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 rounded text-xs font-semibold flex items-center gap-1.5 transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Retry</span>
+            </button>
+          </div>
+        )}
+
         {/* Top Header / Welcome Area */}
         <section className="flex flex-col md:flex-row md:items-center justify-between gap-5 pb-6 border-b border-slate-800/80">
           <div className="space-y-1.5">
@@ -119,7 +184,7 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
             
             <p className="text-sm text-slate-400">
               {progress.streakDays > 0 ? (
-                <>You are currently on a <strong className="text-amber-400 font-semibold">{progress.streakDays}-day study streak</strong>. Keep up the focus.</>
+                <>You are currently on a <strong className="text-amber-400 font-semibold">{progress.streakDays}-day study streak</strong>{progress.longestStreakDays && progress.longestStreakDays > progress.streakDays ? ` (Best: ${progress.longestStreakDays} days)` : ""}. Keep up the focus.</>
               ) : (
                 <>Ready for today&apos;s study session? Open your textbook to build your streak.</>
               )}
@@ -148,7 +213,7 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
           </div>
         </section>
 
-        {/* Weak Concept Recommendation Banner */}
+        {/* Weak Concept Recommendation Banner (Derived dynamically from student_concepts) */}
         {weakConcepts.length > 0 && (
           <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-200">
             <div className="flex items-start gap-3">
@@ -174,15 +239,15 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
           </div>
         )}
 
-        {/* 4 Clean Metric Statistics */}
+        {/* 4 Clean Metric Statistics (Derived strictly from database records) */}
         <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="p-4 rounded-xl bg-[#0f1624] border border-slate-800 flex items-center gap-3.5">
             <div className="p-2.5 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shrink-0">
               <Clock className="w-5 h-5" />
             </div>
             <div>
-              <div className="text-xl font-bold text-white tracking-tight">
-                {formatStudyTime(progress.totalStudyMinutes)}
+              <div data-testid="dashboard-study-time" className="text-xl font-bold text-white tracking-tight">
+                {isLoading ? <Loader2 className="w-5 h-5 animate-spin text-indigo-400" /> : formatStudyTime(progress.totalStudyMinutes)}
               </div>
               <div className="text-xs text-slate-400 font-medium">Total Study Time</div>
             </div>
@@ -193,8 +258,8 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
               <Flame className="w-5 h-5" />
             </div>
             <div>
-              <div className="text-xl font-bold text-amber-400 tracking-tight">
-                {progress.streakDays} {progress.streakDays === 1 ? "Day" : "Days"}
+              <div data-testid="dashboard-streak" className="text-xl font-bold text-amber-400 tracking-tight">
+                {isLoading ? <Loader2 className="w-5 h-5 animate-spin text-amber-400" /> : `${progress.streakDays} ${progress.streakDays === 1 ? "Day" : "Days"}`}
               </div>
               <div className="text-xs text-slate-400 font-medium">Active Streak</div>
             </div>
@@ -205,8 +270,8 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
               <HelpCircle className="w-5 h-5" />
             </div>
             <div>
-              <div className="text-xl font-bold text-white tracking-tight">
-                {progress.quizzesCompleted}
+              <div data-testid="dashboard-quizzes" className="text-xl font-bold text-white tracking-tight">
+                {isLoading ? <Loader2 className="w-5 h-5 animate-spin text-emerald-400" /> : progress.quizzesCompleted}
               </div>
               <div className="text-xs text-slate-400 font-medium">Quizzes Completed</div>
             </div>
@@ -217,15 +282,15 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <div className="text-xl font-bold text-purple-400 tracking-tight">
-                {progress.questionsAsked}
+              <div data-testid="dashboard-queries" className="text-xl font-bold text-purple-400 tracking-tight">
+                {isLoading ? <Loader2 className="w-5 h-5 animate-spin text-purple-400" /> : progress.questionsAsked}
               </div>
               <div className="text-xs text-slate-400 font-medium">AI Tutor Queries</div>
             </div>
           </div>
         </section>
 
-        {/* Main Grid: Active Textbook & Today's Study Plan */}
+        {/* Main Grid: Active Textbook & Today's Study Recommendations */}
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
           {/* Active Textbook Module (2 cols) */}
@@ -238,86 +303,122 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
                 </h3>
               </div>
               {activeBook && (
-                <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                  {Math.round(((activeBook.lastPageRead || 1) / Math.max(1, activeBook.totalPages || 1)) * 100)}% Complete
-                </span>
+                <div className="flex items-center gap-2">
+                  {userBooks.length > 1 && onOpenLibrary && (
+                    <button
+                      onClick={onOpenLibrary}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 font-medium mr-2"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5" />
+                      <span>{userBooks.length} in Library</span>
+                    </button>
+                  )}
+                  <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                    {Math.min(100, Math.round(((activeBook.lastPageRead || 1) / Math.max(1, activeBook.totalPages || 1)) * 100))}% Complete
+                  </span>
+                </div>
               )}
             </div>
 
             {activeBook ? (
-              <div className="flex flex-col sm:flex-row gap-6 items-start">
-                {/* Realistic Book Mockup Spine */}
-                <div className="w-full sm:w-36 h-48 rounded-lg bg-gradient-to-br from-indigo-950 via-slate-900 to-slate-950 border border-indigo-900/40 flex flex-col justify-between p-3.5 relative overflow-hidden shadow-md shrink-0">
-                  <div className="flex justify-between items-start">
-                    <div className="w-1.5 h-full absolute left-0 top-0 bottom-0 bg-indigo-500/30" />
-                    <span className="text-[10px] font-mono text-indigo-300 bg-indigo-950/80 px-1.5 py-0.5 rounded border border-indigo-800/40">
-                      {activeBook.edition || "Academic"}
+              <div className="space-y-4">
+                {/* Processing Incomplete / Failed Status Alerts */}
+                {activeBook.status && activeBook.status !== "READY" && (
+                  <div className={`p-3 rounded-lg border text-xs flex items-center gap-2.5 ${
+                    activeBook.status === "FAILED"
+                      ? "bg-rose-500/10 border-rose-500/30 text-rose-300"
+                      : "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                  }`}>
+                    {activeBook.status === "FAILED" ? (
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                    ) : (
+                      <Loader2 className="w-4 h-4 text-amber-400 animate-spin shrink-0" />
+                    )}
+                    <span>
+                      {activeBook.status === "FAILED"
+                        ? `Processing issue: ${activeBook.statusMessage || "Failed to parse document"}`
+                        : `Textbook status: ${activeBook.status}. Indexing content for RAG...`}
                     </span>
                   </div>
-                  <div>
-                    <div className="text-xs font-bold text-white line-clamp-3 leading-snug">
-                      {activeBook.title}
-                    </div>
-                    <div className="text-[10px] text-slate-400 mt-1 truncate">
-                      {activeBook.author || "Textbook"}
-                    </div>
-                  </div>
-                </div>
+                )}
 
-                <div className="flex-1 space-y-4 w-full">
-                  <div>
-                    <h4 className="font-bold text-base text-white">
-                      {activeBook.title}
-                    </h4>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      {activeBook.author ? `by ${activeBook.author}` : "Academic Textbook"} • {activeBook.totalPages} Total Pages
-                    </p>
-                  </div>
-
-                  {/* Reading Progress */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
-                      <span>Reading Progress</span>
-                      <span className="text-indigo-400 font-semibold">
-                        Page {activeBook.lastPageRead || 1} of {activeBook.totalPages}
+                <div className="flex flex-col sm:flex-row gap-6 items-start">
+                  {/* Realistic Book Mockup Spine */}
+                  <div className="w-full sm:w-36 h-48 rounded-lg bg-gradient-to-br from-indigo-950 via-slate-900 to-slate-950 border border-indigo-900/40 flex flex-col justify-between p-3.5 relative overflow-hidden shadow-md shrink-0">
+                    <div className="flex justify-between items-start">
+                      <div className="w-1.5 h-full absolute left-0 top-0 bottom-0 bg-indigo-500/30" />
+                      <span className="text-[10px] font-mono text-indigo-300 bg-indigo-950/80 px-1.5 py-0.5 rounded border border-indigo-800/40">
+                        {activeBook.edition || "Academic"}
                       </span>
                     </div>
-                    <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                      <div
-                        style={{
-                          width: `${Math.min(100, Math.round(((activeBook.lastPageRead || 1) / Math.max(1, activeBook.totalPages)) * 100))}%`,
-                        }}
-                        className="h-full bg-indigo-500 rounded-full transition-all duration-300"
-                      />
+                    <div>
+                      <div className="text-xs font-bold text-white line-clamp-3 leading-snug">
+                        {activeBook.title}
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-1 truncate">
+                        {activeBook.author || "Textbook"}
+                      </div>
                     </div>
                   </div>
 
-                  {/* Actions */}
-                  <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <button
-                      onClick={() => onContinueStudying(activeBook.lastPageRead || 1)}
-                      className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition-colors flex items-center gap-1.5 shadow-sm"
-                    >
-                      <BookOpen className="w-3.5 h-3.5" />
-                      <span>Resume Reading (p.{activeBook.lastPageRead || 1})</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
+                  <div className="flex-1 space-y-4 w-full">
+                    <div>
+                      <h4 className="font-bold text-base text-white">
+                        {activeBook.title}
+                      </h4>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {activeBook.author ? `by ${activeBook.author}` : "Academic Textbook"} • {activeBook.totalPages} Total Pages
+                      </p>
+                    </div>
 
-                    <button
-                      onClick={onLaunchQuiz}
-                      className="px-3.5 py-2 rounded-lg bg-slate-800/80 hover:bg-slate-800 text-slate-200 font-medium text-xs transition-colors flex items-center gap-1.5 border border-slate-700/60"
-                    >
-                      <HelpCircle className="w-3.5 h-3.5 text-indigo-400" />
-                      <span>Practice Quiz</span>
-                    </button>
+                    {/* Reading Progress */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
+                        <span>Reading Progress</span>
+                        <span className="text-indigo-400 font-semibold">
+                          Page {activeBook.lastPageRead || 1} of {activeBook.totalPages}
+                        </span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          style={{
+                            width: `${Math.min(100, Math.round(((activeBook.lastPageRead || 1) / Math.max(1, activeBook.totalPages)) * 100))}%`,
+                          }}
+                          className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                        />
+                      </div>
+                    </div>
 
-                    <button
-                      onClick={onLaunchFlashcards}
-                      className="px-3.5 py-2 rounded-lg bg-slate-800/80 hover:bg-slate-800 text-slate-200 font-medium text-xs transition-colors flex items-center gap-1.5 border border-slate-700/60"
-                    >
-                      <Layers className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>Flashcards</span>
-                    </button>
+                    {/* Actions */}
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <button
+                        onClick={() => onContinueStudying(activeBook.lastPageRead || 1)}
+                        aria-label={`Resume reading ${activeBook.title} on page ${activeBook.lastPageRead || 1}`}
+                        className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition-colors flex items-center gap-1.5 shadow-sm focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
+                      >
+                        <BookOpen className="w-3.5 h-3.5" />
+                        <span>Resume Reading (p.{activeBook.lastPageRead || 1})</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        onClick={onLaunchQuiz}
+                        aria-label="Launch Practice Quiz"
+                        className="px-3.5 py-2 rounded-lg bg-slate-800/80 hover:bg-slate-800 text-slate-200 font-medium text-xs transition-colors flex items-center gap-1.5 border border-slate-700/60 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
+                      >
+                        <HelpCircle className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>Practice Quiz</span>
+                      </button>
+
+                      <button
+                        onClick={onLaunchFlashcards}
+                        aria-label="Review Flashcards"
+                        className="px-3.5 py-2 rounded-lg bg-slate-800/80 hover:bg-slate-800 text-slate-200 font-medium text-xs transition-colors flex items-center gap-1.5 border border-slate-700/60 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
+                      >
+                        <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Flashcards</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -332,7 +433,8 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
                 </div>
                 <button
                   onClick={onOpenUpload}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold"
+                  aria-label="Import Textbook PDF"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Import Textbook PDF</span>
@@ -341,14 +443,14 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
             )}
           </div>
 
-          {/* Today's Study Plan (1 col) */}
+          {/* Today's Study Recommendations (Derived from current progress) */}
           <div className="p-6 rounded-xl bg-[#0f1624] border border-slate-800 space-y-4 flex flex-col justify-between">
             <div className="space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                   <h3 className="font-semibold text-sm uppercase tracking-wider text-slate-300">
-                    Today&apos;s Study Plan
+                    Daily Study Plan
                   </h3>
                 </div>
                 <span className="text-xs text-slate-400 font-mono">
@@ -397,13 +499,53 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
             </div>
 
             <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
-              <span>Goal: 45 min focus</span>
-              <span className="font-medium text-emerald-400">On Track</span>
+              <span className="text-[11px] text-slate-500">Derived from current reading progress</span>
+              <span className="font-medium text-emerald-400">Personalized</span>
             </div>
           </div>
         </section>
 
-        {/* Bottom Section: Personalized Concept Mastery Matrix */}
+        {/* Recent Activity Timeline (From real study_events table) */}
+        <section className="p-6 rounded-xl bg-[#0f1624] border border-slate-800 space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+            <div className="flex items-center gap-2">
+              <Activity className="w-4 h-4 text-cyan-400" />
+              <h3 className="font-semibold text-sm uppercase tracking-wider text-slate-300">
+                Recent Activity
+              </h3>
+            </div>
+            <span className="text-xs text-slate-400">
+              Real-time study event feed
+            </span>
+          </div>
+
+          {progress.recentActivity && progress.recentActivity.length > 0 ? (
+            <div className="divide-y divide-slate-800/60">
+              {progress.recentActivity.slice(0, 6).map((act, idx) => (
+                <div key={act.id || idx} className="py-2.5 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0" />
+                    <span className="text-slate-200 font-medium truncate">{act.title}</span>
+                    {act.pageNumber && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-indigo-300 font-mono">
+                        p.{act.pageNumber}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[11px] text-slate-500 font-mono shrink-0 ml-3">
+                    {formatTimeAgo(act.timestamp)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="py-6 text-center text-slate-500 text-xs">
+              No study activity recorded yet. Open a textbook or ask the AI tutor to begin your study session.
+            </div>
+          )}
+        </section>
+
+        {/* Personalized Concept Mastery Matrix (Grounded in student_concepts table) */}
         <section className="p-6 rounded-xl bg-[#0f1624] border border-slate-800 space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
             <div>

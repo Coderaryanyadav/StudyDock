@@ -1,5 +1,5 @@
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { verifyBookOwnership, verifyConversationOwnership } from "@/lib/supabase/auth";
 import { ChatMessage, Citation, LearningMode } from "@/types";
 
 export interface ConversationSummary {
@@ -19,29 +19,54 @@ export interface ConversationRecord {
 }
 
 /**
- * Lists all active conversations for a specific user and textbook
+ * Sanitizes and truncates conversation title deterministically
+ */
+export function sanitizeConversationTitle(input: string, maxLength = 50): string {
+  if (!input) return "Academic Tutor Session";
+  const cleaned = input
+    .trim()
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/[^\w\s\-\?\.\,\:\!]/gi, "")
+    .replace(/\s+/g, " ");
+  if (!cleaned) return "Academic Tutor Session";
+  return cleaned.length > maxLength ? cleaned.slice(0, maxLength).trim() + "..." : cleaned;
+}
+
+/**
+ * Lists all active conversations for an authenticated user and textbook
+ * Fails closed if book is not owned by user.
  */
 export async function getConversationsForUser(
   userId: string,
-  bookId?: string
+  bookId: string
 ): Promise<ConversationSummary[]> {
-  const supabase = (await createServerSupabaseClient()) || createAdminClient();
-  if (!supabase || !userId) return [];
+  if (!userId || !bookId) {
+    throw new Error("User ID and Book ID are required to list conversations.");
+  }
 
-  let query = supabase
+  const isOwner = await verifyBookOwnership(userId, bookId);
+  if (!isOwner) {
+    throw new Error("Access denied. You do not own this textbook.");
+  }
+
+  const supabase = await createServerSupabaseClient();
+  if (!supabase) {
+    throw new Error("Database service unavailable.");
+  }
+
+  const { data, error } = await supabase
     .from("conversations")
     .select("id, book_id, title, created_at, updated_at")
     .eq("user_id", userId)
+    .eq("book_id", bookId)
     .order("updated_at", { ascending: false });
 
-  if (bookId) {
-    query = query.eq("book_id", bookId);
+  if (error) {
+    console.error("Fetch conversations error:", error.message);
+    throw new Error(`Database error fetching conversations: ${error.message}`);
   }
 
-  const { data, error } = await query;
-  if (error || !data) return [];
-
-  return data.map((c) => ({
+  return (data || []).map((c) => ({
     id: c.id,
     bookId: c.book_id,
     title: c.title || "Study Session",
@@ -51,18 +76,27 @@ export async function getConversationsForUser(
 }
 
 /**
- * Retrieves a full conversation history with grounded citations
+ * Retrieves a full conversation record with real persisted messages and citations
+ * Verifies conversation ownership and book-scoping strictly.
  */
 export async function getConversationWithMessages(
   userId: string,
-  conversationId: string
+  conversationId: string,
+  expectedBookId?: string
 ): Promise<ConversationRecord | null> {
-  const supabase = (await createServerSupabaseClient()) || createAdminClient();
-  if (!supabase || !userId || !conversationId) return null;
+  if (!userId || !conversationId) return null;
+
+  const isConvOwner = await verifyConversationOwnership(userId, conversationId, expectedBookId);
+  if (!isConvOwner) {
+    return null;
+  }
+
+  const supabase = await createServerSupabaseClient();
+  if (!supabase) return null;
 
   const { data: conv, error: convErr } = await supabase
     .from("conversations")
-    .select("*")
+    .select("id, book_id, title, created_at, updated_at")
     .eq("id", conversationId)
     .eq("user_id", userId)
     .single();
@@ -75,14 +109,9 @@ export async function getConversationWithMessages(
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true });
 
-  if (msgErr || !msgs) {
-    return {
-      id: conv.id,
-      bookId: conv.book_id,
-      title: conv.title,
-      createdAt: conv.created_at,
-      messages: [],
-    };
+  if (msgErr) {
+    console.error("Fetch messages error:", msgErr.message);
+    throw new Error(`Database error fetching messages: ${msgErr.message}`);
   }
 
   return {
@@ -90,19 +119,22 @@ export async function getConversationWithMessages(
     bookId: conv.book_id,
     title: conv.title,
     createdAt: conv.created_at,
-    messages: msgs.map((m: any) => ({
+    messages: (msgs || []).map((m: any) => ({
       id: m.id,
-      sender: m.sender === "user" ? "user" : "ai",
+      sender: m.sender === "user" ? "user" : m.sender === "system" ? "system" : "ai",
       content: m.content,
       timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      learningMode: m.learning_mode as LearningMode | undefined,
+      learningMode: (m.learning_mode as LearningMode) || "explain",
       citations: (m.message_citations || []).map((c: any) => ({
         id: c.id,
+        sourceType: (c.source_type as "textbook" | "youtube") || (c.video_timestamp_seconds !== null ? "youtube" : "textbook"),
         bookId: conv.book_id,
-        bookTitle: c.book_title,
+        bookTitle: c.book_title || "Textbook",
         chapter: c.chapter_title || "Chapter",
         section: c.section_title || "Section",
         pageNumber: c.page_number,
+        videoTimestampSeconds: c.video_timestamp_seconds ?? undefined,
+        videoFormattedTime: c.video_formatted_time ?? undefined,
         excerpt: c.excerpt,
       })),
     })),
@@ -111,26 +143,44 @@ export async function getConversationWithMessages(
 
 /**
  * Creates a new private conversation thread for a book
+ * Verifies book ownership before inserting into PostgreSQL.
  */
 export async function createConversation(
   userId: string,
   bookId: string,
   title?: string
-): Promise<ConversationSummary | null> {
-  const supabase = (await createServerSupabaseClient()) || createAdminClient();
-  if (!supabase || !userId || !bookId) return null;
+): Promise<ConversationSummary> {
+  if (!userId || !bookId) {
+    throw new Error("User ID and Book ID are required to create a conversation.");
+  }
+
+  const isOwner = await verifyBookOwnership(userId, bookId);
+  if (!isOwner) {
+    throw new Error("Access denied. You do not own this textbook.");
+  }
+
+  const supabase = await createServerSupabaseClient();
+  if (!supabase) {
+    throw new Error("Database service unavailable.");
+  }
+
+  const initialTitle = sanitizeConversationTitle(title || "New Academic Chat");
 
   const { data, error } = await supabase
     .from("conversations")
     .insert({
       user_id: userId,
       book_id: bookId,
-      title: title || "New Academic Chat",
+      title: initialTitle,
     })
     .select("id, book_id, title, created_at, updated_at")
     .single();
 
-  if (error || !data) return null;
+  if (error || !data) {
+    console.error("Create conversation error:", error?.message);
+    throw new Error(`Failed to create conversation in database: ${error?.message || "Insert failed"}`);
+  }
+
   return {
     id: data.id,
     bookId: data.book_id,
@@ -141,37 +191,61 @@ export async function createConversation(
 }
 
 /**
- * Renames an existing conversation title
+ * Renames an existing conversation title with ownership verification
  */
 export async function renameConversation(
   userId: string,
   conversationId: string,
-  title: string
+  title: string,
+  expectedBookId?: string
 ): Promise<boolean> {
-  const supabase = (await createServerSupabaseClient()) || createAdminClient();
-  if (!supabase || !userId || !conversationId || !title.trim()) return false;
+  if (!userId || !conversationId || !title?.trim()) {
+    throw new Error("User ID, Conversation ID, and a non-empty Title are required.");
+  }
+
+  const sanitized = sanitizeConversationTitle(title, 80);
+  const isConvOwner = await verifyConversationOwnership(userId, conversationId, expectedBookId);
+  if (!isConvOwner) {
+    return false;
+  }
+
+  const supabase = await createServerSupabaseClient();
+  if (!supabase) return false;
 
   const { error } = await supabase
     .from("conversations")
     .update({
-      title: title.trim(),
+      title: sanitized,
       updated_at: new Date().toISOString(),
     })
     .eq("id", conversationId)
     .eq("user_id", userId);
 
-  return !error;
+  if (error) {
+    console.error("Rename conversation DB error:", error.message);
+    throw new Error(`Database error renaming conversation: ${error.message}`);
+  }
+
+  return true;
 }
 
 /**
- * Deletes a conversation and cascades all messages & citations
+ * Deletes a conversation and cascades all messages & citations safely
  */
 export async function deleteConversation(
   userId: string,
-  conversationId: string
+  conversationId: string,
+  expectedBookId?: string
 ): Promise<boolean> {
-  const supabase = (await createServerSupabaseClient()) || createAdminClient();
-  if (!supabase || !userId || !conversationId) return false;
+  if (!userId || !conversationId) return false;
+
+  const isConvOwner = await verifyConversationOwnership(userId, conversationId, expectedBookId);
+  if (!isConvOwner) {
+    return false;
+  }
+
+  const supabase = await createServerSupabaseClient();
+  if (!supabase) return false;
 
   const { error } = await supabase
     .from("conversations")
@@ -179,11 +253,17 @@ export async function deleteConversation(
     .eq("id", conversationId)
     .eq("user_id", userId);
 
-  return !error;
+  if (error) {
+    console.error("Delete conversation DB error:", error.message);
+    throw new Error(`Database error deleting conversation: ${error.message}`);
+  }
+
+  return true;
 }
 
 /**
- * Saves a message and associated citations to database
+ * Saves a user or AI message and associated citations to database.
+ * Automatically updates conversation title on first user question if title is default.
  */
 export async function saveMessage(
   userId: string,
@@ -192,43 +272,85 @@ export async function saveMessage(
   content: string,
   learningMode?: string,
   citations?: Citation[]
-): Promise<string | null> {
-  const supabase = (await createServerSupabaseClient()) || createAdminClient();
-  if (!supabase || !userId || !conversationId || !content) return null;
+): Promise<string> {
+  if (!userId || !conversationId || !content?.trim()) {
+    throw new Error("User ID, Conversation ID, and message content are required.");
+  }
+
+  const isConvOwner = await verifyConversationOwnership(userId, conversationId);
+  if (!isConvOwner) {
+    throw new Error("Access denied. You do not own this conversation.");
+  }
+
+  const supabase = await createServerSupabaseClient();
+  if (!supabase) {
+    throw new Error("Database service unavailable.");
+  }
 
   const { data: msg, error } = await supabase
     .from("messages")
     .insert({
       conversation_id: conversationId,
       sender,
-      content,
-      learning_mode: learningMode || null,
+      content: content.trim(),
+      learning_mode: learningMode || "explain",
     })
     .select("id")
     .single();
 
-  if (error || !msg) return null;
+  if (error || !msg) {
+    console.error("Save message DB error:", error?.message);
+    throw new Error(`Failed to save message to database: ${error?.message || "Insert failed"}`);
+  }
 
   // Insert message citations matching database schema
   if (citations && citations.length > 0) {
     const citationRecords = citations.map((c) => ({
       message_id: msg.id,
-      chunk_id: c.id && c.id.startsWith("cite-chunk-") ? c.id.replace("cite-chunk-", "") : null,
+      chunk_id: c.id && c.id.startsWith("cite-tb-") ? c.id.replace("cite-tb-", "") : null,
+      source_type: c.sourceType || "textbook",
       book_title: c.bookTitle || "Textbook",
       chapter_title: c.chapter || null,
       section_title: c.section || null,
       page_number: c.pageNumber || 1,
+      video_timestamp_seconds: c.videoTimestampSeconds ?? null,
+      video_formatted_time: c.videoFormattedTime ?? null,
       excerpt: c.excerpt || "",
     }));
 
-    await supabase.from("message_citations").insert(citationRecords);
+    const { error: citeErr } = await supabase.from("message_citations").insert(citationRecords);
+    if (citeErr) {
+      console.error("Save citations DB error:", citeErr.message);
+    }
   }
 
-  // Update conversation updated_at
+  // Update conversation updated_at and auto-generate title if currently default
+  const { data: conv } = await supabase
+    .from("conversations")
+    .select("title")
+    .eq("id", conversationId)
+    .single();
+
+  const currentTitle = conv?.title || "";
+  const isDefaultTitle =
+    !currentTitle ||
+    currentTitle === "New Academic Chat" ||
+    currentTitle === "Academic Tutor Session" ||
+    currentTitle === "Study Session";
+
+  const updatePayload: { updated_at: string; title?: string } = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (sender === "user" && isDefaultTitle) {
+    updatePayload.title = sanitizeConversationTitle(content, 45);
+  }
+
   await supabase
     .from("conversations")
-    .update({ updated_at: new Date().toISOString() })
+    .update(updatePayload)
     .eq("id", conversationId);
 
   return msg.id;
 }
+

@@ -71,11 +71,11 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
     }
   };
 
-  // 1. Load conversations list & latest conversation history
+  // 1. Load conversations list & latest conversation history from database
   const loadConversations = async (targetConvId?: string) => {
     if (!book?.id) return;
     try {
-      const res = await fetch(`/api/chat?bookId=${encodeURIComponent(book.id)}&list=true`);
+      const res = await fetch(`/api/conversations?bookId=${encodeURIComponent(book.id)}`);
       const data = await res.json();
       if (res.ok && data.success && Array.isArray(data.conversations)) {
         setConversations(data.conversations);
@@ -109,7 +109,7 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
     if (!book?.id || !convId) return;
     try {
       setActiveConversationId(convId);
-      const res = await fetch(`/api/chat?bookId=${encodeURIComponent(book.id)}&conversationId=${encodeURIComponent(convId)}`);
+      const res = await fetch(`/api/conversations/${encodeURIComponent(convId)}?bookId=${encodeURIComponent(book.id)}`);
       const data = await res.json();
       if (res.ok && data.success) {
         if (Array.isArray(data.messages) && data.messages.length > 0) {
@@ -157,27 +157,118 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalPrompt]);
 
-  const handleCreateNewConversation = () => {
-    setActiveConversationId(null);
-    setShowConvDropdown(false);
-    setMessages([
-      {
-        id: `msg-new-${Date.now()}`,
-        sender: "ai",
-        content: `New chat started for *${book.title}*. What topic would you like to explore?`,
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        suggestedFollowUps: [
-          "Summarize current page",
-          "Explain the technical diagram",
-          "Test my knowledge",
-        ],
-      },
-    ]);
+  const handleCreateNewConversation = async () => {
+    if (!book?.id) return;
+    try {
+      const res = await fetch("/api/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookId: book.id,
+          title: "New Academic Chat",
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.conversation?.id) {
+        const newConv = data.conversation;
+        setConversations((prev) => [newConv, ...prev.filter((c) => c.id !== newConv.id)]);
+        setActiveConversationId(newConv.id);
+        setShowConvDropdown(false);
+        setMessages([
+          {
+            id: `msg-new-${newConv.id}`,
+            sender: "ai",
+            content: `New chat started for *${book.title}*. What topic would you like to explore?`,
+            timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            suggestedFollowUps: [
+              "Summarize current page",
+              "Explain the technical diagram",
+              "Test my knowledge",
+            ],
+          },
+        ]);
+      }
+    } catch (err) {
+      console.error("Failed to create conversation:", err);
+    }
+  };
+
+  const handleRenameConversation = async (convId: string, currentTitle: string) => {
+    const newTitle = prompt("Enter new title for conversation:", currentTitle);
+    if (!newTitle || !newTitle.trim() || newTitle.trim() === currentTitle) return;
+
+    try {
+      const res = await fetch(`/api/conversations/${encodeURIComponent(convId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: newTitle.trim(),
+          bookId: book.id,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setConversations((prev) =>
+          prev.map((c) => (c.id === convId ? { ...c, title: newTitle.trim() } : c))
+        );
+      }
+    } catch (err) {
+      console.error("Rename conversation error:", err);
+    }
+  };
+
+  const handleDeleteConversation = async (convId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("Are you sure you want to delete this conversation?")) return;
+
+    try {
+      const res = await fetch(`/api/conversations/${encodeURIComponent(convId)}?bookId=${encodeURIComponent(book.id)}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const remaining = conversations.filter((c) => c.id !== convId);
+        setConversations(remaining);
+
+        if (activeConversationId === convId) {
+          if (remaining.length > 0) {
+            loadConversationHistory(remaining[0].id);
+          } else {
+            handleCreateNewConversation();
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Delete conversation error:", err);
+    }
   };
 
   const handleSendMessage = async (customText?: string) => {
     const textToSend = (customText || inputQuestion).trim();
     if (!textToSend || isStreaming || !book?.id) return;
+
+    // Ensure real active conversation ID exists before sending message
+    let convIdToSend = activeConversationId;
+    if (!convIdToSend) {
+      try {
+        const res = await fetch("/api/conversations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bookId: book.id,
+            title: textToSend.slice(0, 40),
+          }),
+        });
+        const data = await res.json();
+        if (res.ok && data.success && data.conversation?.id) {
+          convIdToSend = data.conversation.id;
+          setActiveConversationId(convIdToSend);
+          setConversations((prev) => [data.conversation, ...prev]);
+        }
+      } catch (e) {
+        console.error("Auto conversation creation failed:", e);
+      }
+    }
 
     const userMessage: ChatMessage = {
       id: `msg-user-${Date.now()}`,
@@ -206,7 +297,7 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           bookId: book.id,
-          conversationId: activeConversationId || undefined,
+          conversationId: convIdToSend || undefined,
           question: textToSend,
           currentPage: activePageNumber,
           learningMode,
@@ -223,7 +314,7 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
       let fullContent = "";
       let accumulatedCitations: Citation[] = [];
       let followUps: string[] = [];
-      let conversationIdAssigned = activeConversationId;
+      let conversationIdAssigned = convIdToSend;
 
       if (reader) {
         while (true) {
@@ -280,7 +371,7 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
         }
       }
 
-      if (conversationIdAssigned && (!conversations || conversations.length === 0)) {
+      if (conversationIdAssigned) {
         loadConversations(conversationIdAssigned);
       }
     } catch (err: any) {
@@ -331,7 +422,10 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
         <div className="relative">
           <button
             onClick={() => setShowConvDropdown(!showConvDropdown)}
-            className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-slate-800 text-slate-200 font-semibold transition-colors"
+            aria-label="Select Academic Conversation"
+            aria-expanded={showConvDropdown}
+            data-testid="ai-conv-dropdown-btn"
+            className="flex items-center gap-1.5 px-2 py-1 rounded hover:bg-slate-800 text-slate-200 font-semibold transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
           >
             <Bot className="w-3.5 h-3.5 text-indigo-400" />
             <span className="truncate max-w-[160px] md:max-w-[220px]">{activeConvTitle}</span>
@@ -339,12 +433,14 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
           </button>
 
           {showConvDropdown && (
-            <div className="absolute left-0 mt-1 w-64 bg-[#0f1624] border border-slate-800 rounded-lg shadow-xl p-2 z-50 text-xs animate-in fade-in">
+            <div data-testid="ai-conv-dropdown-menu" className="absolute left-0 mt-1 w-64 bg-[#0f1624] border border-slate-800 rounded-lg shadow-xl p-2 z-50 text-xs animate-in fade-in">
               <div className="flex items-center justify-between pb-1.5 border-b border-slate-800/80 mb-1.5 px-1">
                 <span className="text-[10px] uppercase font-bold text-slate-400">Past Conversations</span>
                 <button
                   onClick={handleCreateNewConversation}
-                  className="flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300 font-medium"
+                  aria-label="Start New Chat"
+                  data-testid="ai-menu-new-chat-btn"
+                  className="flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300 font-medium focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none rounded px-1"
                 >
                   <Plus className="w-3 h-3" />
                   <span>New Chat</span>
@@ -353,21 +449,47 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
 
               <div className="max-h-56 overflow-y-auto space-y-1 custom-scrollbar">
                 {conversations.map((conv) => (
-                  <button
+                  <div
                     key={conv.id}
-                    onClick={() => {
-                      loadConversationHistory(conv.id);
-                      setShowConvDropdown(false);
-                    }}
-                    className={`w-full text-left p-1.5 rounded transition-colors flex items-center gap-2 ${
+                    data-testid={`conv-item-${conv.id}`}
+                    className={`w-full p-1.5 rounded transition-colors flex items-center justify-between gap-1 group ${
                       conv.id === activeConversationId
                         ? "bg-indigo-600/20 text-indigo-300 font-medium"
                         : "text-slate-300 hover:bg-slate-800"
                     }`}
                   >
-                    <MessageSquare className="w-3 h-3 text-slate-500 shrink-0" />
-                    <span className="truncate flex-1">{conv.title}</span>
-                  </button>
+                    <button
+                      onClick={() => {
+                        loadConversationHistory(conv.id);
+                        setShowConvDropdown(false);
+                      }}
+                      className="flex items-center gap-2 flex-1 text-left truncate min-w-0 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none rounded"
+                    >
+                      <MessageSquare className="w-3 h-3 text-slate-500 shrink-0" />
+                      <span className="truncate flex-1">{conv.title}</span>
+                    </button>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRenameConversation(conv.id, conv.title);
+                        }}
+                        aria-label={`Rename chat ${conv.title}`}
+                        className="p-0.5 hover:text-white text-slate-400 focus-visible:ring-2 focus-visible:ring-indigo-500 rounded"
+                        title="Rename Chat"
+                      >
+                        <Sparkles className="w-2.5 h-2.5" />
+                      </button>
+                      <button
+                        onClick={(e) => handleDeleteConversation(conv.id, e)}
+                        aria-label={`Delete chat ${conv.title}`}
+                        className="p-0.5 hover:text-rose-400 text-slate-400 focus-visible:ring-2 focus-visible:ring-indigo-500 rounded"
+                        title="Delete Chat"
+                      >
+                        <Trash2 className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -376,12 +498,14 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
 
         {/* Right: Learning Mode Selector & New Chat */}
         <div className="flex items-center gap-2">
-          <div className="flex items-center bg-[#060910] p-0.5 rounded border border-slate-800">
+          <div className="flex items-center bg-[#060910] p-0.5 rounded border border-slate-800" role="tablist" aria-label="Learning Mode Tabs">
             {Object.values(LEARNING_MODES).slice(0, 4).map((m) => (
               <button
                 key={m.id}
+                role="tab"
+                aria-selected={learningMode === m.id}
                 onClick={() => setLearningMode(m.id as LearningMode)}
-                className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none ${
                   learningMode === m.id
                     ? "bg-indigo-600 text-white shadow-sm"
                     : "text-slate-400 hover:text-slate-200"
@@ -395,7 +519,9 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
 
           <button
             onClick={handleCreateNewConversation}
-            className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+            aria-label="Start New Academic Conversation"
+            data-testid="ai-new-chat-btn"
+            className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
             title="Start New Conversation"
           >
             <Plus className="w-4 h-4" />
@@ -409,26 +535,28 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
       {/* ========================================================================= */}
       <div
         ref={chatContainerRef}
+        data-testid="ai-messages-container"
         className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5 custom-scrollbar text-xs md:text-sm"
       >
         {messages.map((msg) => (
           <div
             key={msg.id}
+            data-testid={`ai-message-${msg.sender}`}
             className={`flex gap-3 max-w-3xl mx-auto ${
               msg.sender === "user" ? "justify-end" : "justify-start"
             }`}
           >
             {msg.sender === "ai" && (
-              <div className="w-6 h-6 rounded-md bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center shrink-0 mt-0.5">
+              <div className="w-6 h-6 rounded-md bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
                 <Sparkles className="w-3.5 h-3.5" />
               </div>
             )}
 
             <div
-              className={`space-y-2 rounded-lg p-3.5 md:p-4 leading-relaxed ${
+              className={`space-y-2.5 rounded-lg p-3.5 md:p-4 leading-relaxed ${
                 msg.sender === "user"
-                  ? "bg-indigo-600 text-white max-w-[85%]"
-                  : "bg-[#0f1624] border border-slate-800 text-slate-200 w-full"
+                  ? "bg-indigo-600 text-white max-w-[85%] shadow-sm"
+                  : "bg-[#0f1624] border border-slate-800 text-slate-200 w-full shadow-sm"
               }`}
             >
               {/* Message Header (AI side) */}
@@ -438,17 +566,18 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
                   <div className="flex items-center gap-1.5">
                     <button
                       onClick={() => handleCopyMessage(msg.id, msg.content)}
-                      className="hover:text-slate-200 transition-colors p-0.5"
+                      aria-label="Copy AI response"
+                      className="hover:text-slate-200 transition-colors p-1 rounded focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
                       title="Copy response"
                     >
-                      {copiedId === msg.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      {copiedId === msg.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                     </button>
                   </div>
                 </div>
               )}
 
               {/* Message Content */}
-              <div className="prose prose-invert max-w-none text-xs md:text-sm leading-relaxed whitespace-pre-wrap font-sans">
+              <div data-testid="ai-message-text" className="prose prose-invert max-w-none text-xs md:text-sm leading-relaxed whitespace-pre-wrap font-sans">
                 {msg.content ? (
                   renderMathInText(msg.content)
                 ) : (
@@ -461,14 +590,15 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
 
               {/* Citations & Source Badges (Segregated Dual-Source) */}
               {msg.citations && msg.citations.length > 0 && (
-                <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
-                  <div className="text-[10px] uppercase font-bold text-slate-400 font-mono">
+                <div className="pt-2.5 border-t border-slate-800/80 space-y-1.5" data-testid="ai-citations-list">
+                  <div className="text-[10px] uppercase font-bold text-slate-400 font-mono tracking-wider">
                     Grounded Sources & Citations
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {msg.citations.map((cite, cIdx) => (
                       <button
                         key={cIdx}
+                        data-testid="ai-citation-badge"
                         onClick={() => {
                           if (cite.sourceType === "youtube" && cite.videoTimestampSeconds !== undefined && onSeekVideoTimestamp) {
                             onSeekVideoTimestamp(cite.videoTimestampSeconds);
@@ -476,10 +606,15 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
                             onNavigateToTextbookPage(cite.pageNumber);
                           }
                         }}
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-medium transition-colors ${
+                        aria-label={
                           cite.sourceType === "youtube"
-                            ? "bg-rose-500/10 text-rose-400 border border-rose-500/30 hover:bg-rose-500/20"
-                            : "bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 hover:bg-indigo-500/20"
+                            ? `Jump to lecture timestamp ${cite.videoFormattedTime || ""}`
+                            : `Jump to textbook page ${cite.pageNumber}`
+                        }
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-mono font-medium transition-all focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none ${
+                          cite.sourceType === "youtube"
+                            ? "bg-rose-500/10 text-rose-400 border border-rose-500/30 hover:bg-rose-500/20 active:scale-[0.98]"
+                            : "bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 hover:bg-indigo-500/20 active:scale-[0.98]"
                         }`}
                       >
                         {cite.sourceType === "youtube" ? (
@@ -505,7 +640,7 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
                     <button
                       key={chipIdx}
                       onClick={() => handleSendMessage(chip)}
-                      className="text-[11px] px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 transition-colors text-left"
+                      className="text-[11px] px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 transition-colors text-left focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
                     >
                       {chip}
                     </button>
@@ -535,6 +670,8 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
               value={inputQuestion}
               onChange={(e) => setInputQuestion(e.target.value)}
               onKeyDown={handleKeyDown}
+              data-testid="ai-prompt-input"
+              aria-label="Ask your AI Academic Tutor"
               placeholder={`Ask your tutor about ${book.title} (Page ${activePageNumber})...`}
               rows={2}
               className="w-full bg-transparent text-white text-xs md:text-sm placeholder:text-slate-500 focus:outline-none resize-none pr-10 custom-scrollbar"
@@ -543,7 +680,9 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
             <button
               onClick={() => handleSendMessage()}
               disabled={!inputQuestion.trim() || isStreaming}
-              className="absolute right-3 bottom-3 p-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 text-white transition-all shadow-sm active:scale-95"
+              data-testid="ai-send-btn"
+              aria-label="Send message to AI tutor"
+              className="absolute right-3 bottom-3 p-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 text-white transition-all shadow-sm active:scale-95 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
               title="Send message (Enter)"
             >
               <Send className="w-3.5 h-3.5" />

@@ -1,25 +1,16 @@
 import { createServerSupabaseClient } from "./server";
-import { createAdminClient } from "./admin";
 import { NextRequest } from "next/server";
 
 export interface AuthSessionUser {
   id: string;
   email: string;
   displayName?: string;
-  isDemo?: boolean;
 }
 
 /**
- * Checks whether the server is explicitly operating in isolated DEMO_MODE.
- */
-export function isDemoMode(): boolean {
-  return process.env.DEMO_MODE === "true";
-}
-
-/**
- * Authenticates an incoming API request.
- * Returns the authenticated user or null.
- * Strictly returns null for unauthenticated users in production.
+ * Authenticates an incoming API request via Supabase Auth session.
+ * Derives user identity strictly from auth.getUser().
+ * Returns null if not authenticated (fail-closed).
  */
 export async function authenticateRequest(req?: NextRequest): Promise<AuthSessionUser | null> {
   return getAuthenticatedUser(req);
@@ -27,16 +18,7 @@ export async function authenticateRequest(req?: NextRequest): Promise<AuthSessio
 
 export async function getAuthenticatedUser(req?: NextRequest): Promise<AuthSessionUser | null> {
   const supabase = await createServerSupabaseClient();
-
   if (!supabase) {
-    if (isDemoMode()) {
-      return {
-        id: "demo-user-001",
-        email: "demo@studydock.ai",
-        displayName: "Demo Scholar",
-        isDemo: true,
-      };
-    }
     return null;
   }
 
@@ -47,14 +29,6 @@ export async function getAuthenticatedUser(req?: NextRequest): Promise<AuthSessi
     } = await supabase.auth.getUser();
 
     if (error || !user) {
-      if (isDemoMode()) {
-        return {
-          id: "demo-user-001",
-          email: "demo@studydock.ai",
-          displayName: "Demo Scholar",
-          isDemo: true,
-        };
-      }
       return null;
     }
 
@@ -62,7 +36,6 @@ export async function getAuthenticatedUser(req?: NextRequest): Promise<AuthSessi
       id: user.id,
       email: user.email || "",
       displayName: user.user_metadata?.full_name || user.email?.split("@")[0] || "Scholar",
-      isDemo: false,
     };
   } catch (err) {
     console.error("Auth verification error:", err);
@@ -71,22 +44,15 @@ export async function getAuthenticatedUser(req?: NextRequest): Promise<AuthSessi
 }
 
 /**
- * Verifies that the authenticated user strictly owns the requested book.
- * Returns true if owned (or if in demo mode and accessing demo book), false otherwise.
+ * Verifies that the authenticated user strictly owns the requested book in Supabase.
+ * Fails closed if book does not belong to userId or does not exist.
  */
 export async function verifyBookOwnership(userId: string, bookId: string): Promise<boolean> {
-  if (!bookId) return false;
-
-  // Demo book access is only allowed for demo book IDs when explicitly in DEMO_MODE
-  if (bookId.startsWith("demo-")) {
-    return isDemoMode();
-  }
-
-  if (!userId || userId === "guest-user") {
+  if (!bookId || !userId || userId === "guest-user") {
     return false;
   }
 
-  const supabase = await createServerSupabaseClient() || createAdminClient();
+  const supabase = await createServerSupabaseClient();
   if (!supabase) return false;
 
   try {
@@ -117,18 +83,18 @@ export async function verifyConversationOwnership(
 ): Promise<boolean> {
   if (!conversationId || !userId || userId === "guest-user") return false;
 
-  const supabase = await createServerSupabaseClient() || createAdminClient();
+  const supabase = await createServerSupabaseClient();
   if (!supabase) return false;
 
   try {
-    const query = supabase
+    let query = supabase
       .from("conversations")
       .select("id, user_id, book_id")
       .eq("id", conversationId)
       .eq("user_id", userId);
 
-    if (expectedBookId && !expectedBookId.startsWith("demo-")) {
-      query.eq("book_id", expectedBookId);
+    if (expectedBookId) {
+      query = query.eq("book_id", expectedBookId);
     }
 
     const { data, error } = await query.single();

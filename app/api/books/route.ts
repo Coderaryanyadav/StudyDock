@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/supabase/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+
 export async function GET(req: NextRequest) {
   try {
     const auth = await authenticateRequest(req);
@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const supabase = await createServerSupabaseClient() || createAdminClient();
+    const supabase = await createServerSupabaseClient();
     if (!supabase) {
       return NextResponse.json(
         { error: "Database service is unconfigured. Please configure Supabase environment variables." },

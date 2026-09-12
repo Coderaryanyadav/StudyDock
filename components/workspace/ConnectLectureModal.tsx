@@ -66,6 +66,7 @@ export const ConnectLectureModal: React.FC<ConnectLectureModalProps> = ({
                 onChange={(e) => setUrl(e.target.value)}
                 placeholder="https://www.youtube.com/watch?v=..."
                 required
+                data-testid="youtube-url-input"
                 className="w-full bg-slate-950 text-xs px-3 py-2.5 rounded-xl border border-slate-800 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-red-500"
               />
               <Link className="w-4 h-4 text-slate-500 absolute right-3 top-3" />
@@ -82,12 +83,13 @@ export const ConnectLectureModal: React.FC<ConnectLectureModalProps> = ({
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. University Lecture / Topic Video"
               required
+              data-testid="youtube-title-input"
               className="w-full bg-slate-950 text-xs px-3 py-2.5 rounded-xl border border-slate-800 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
             />
           </div>
 
           {error && (
-            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-400 flex items-center gap-2">
+            <div data-testid="youtube-error-alert" className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-400 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{error}</span>
             </div>
@@ -107,12 +109,14 @@ export const ConnectLectureModal: React.FC<ConnectLectureModalProps> = ({
             <button
               type="button"
               onClick={onClose}
+              data-testid="youtube-cancel-btn"
               className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
+              data-testid="youtube-submit-btn"
               className="px-4 py-2 rounded-xl text-xs font-medium bg-red-600 hover:bg-red-500 text-white transition-colors flex items-center gap-1.5"
             >
               <Check className="w-4 h-4" />

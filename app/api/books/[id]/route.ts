@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { Book, BookPage, Chapter } from "@/types";
 
 export async function GET(
@@ -34,7 +33,7 @@ export async function GET(
       );
     }
 
-    const supabase = await createServerSupabaseClient() || createAdminClient();
+    const supabase = await createServerSupabaseClient();
     if (!supabase) {
       return NextResponse.json({ error: "Database client unavailable." }, { status: 500 });
     }
@@ -51,43 +50,52 @@ export async function GET(
       return NextResponse.json({ error: "Book not found." }, { status: 404 });
     }
 
-    // Fetch pages
+    // Fetch pages with chapter and section joins
     const { data: pagesData } = await supabase
       .from("book_pages")
-      .select("*")
+      .select("*, chapters:chapter_id(id, title), sections:section_id(id, title)")
       .eq("book_id", bookId)
       .order("page_number", { ascending: true });
 
-    // Fetch chapters
+    // Fetch chapters with sections
     const { data: chaptersData } = await supabase
       .from("chapters")
       .select("*, sections(*)")
       .eq("book_id", bookId)
       .order("number", { ascending: true });
 
-    const pages: BookPage[] = (pagesData || []).map((p) => ({
-      pageNumber: p.page_number,
-      chapterId: p.chapter_id || null,
-      chapterTitle: p.chapter_title || null,
-      sectionId: p.section_id || null,
-      sectionTitle: p.section_title || null,
-      title: p.title || `Page ${p.page_number}`,
-      content: p.content,
-      keyTakeaways: p.key_takeaways || [],
-      equations: p.equations || [],
-    }));
+    const pages: BookPage[] = (pagesData || []).map((p: any) => {
+      const chTitle = p.chapters?.title || null;
+      const secTitle = p.sections?.title || null;
+      return {
+        id: p.id,
+        bookId: p.book_id,
+        pageNumber: p.page_number,
+        chapterId: p.chapter_id || null,
+        chapterTitle: chTitle,
+        sectionId: p.section_id || null,
+        sectionTitle: secTitle,
+        title: p.title || secTitle || (chTitle ? `${chTitle} (p.${p.page_number})` : `Page ${p.page_number}`),
+        content: p.content,
+        keyTakeaways: p.key_takeaways || [],
+        equations: p.equations || [],
+      };
+    });
 
     const chapters: Chapter[] = (chaptersData || []).map((ch) => ({
       id: ch.id,
+      bookId: ch.book_id,
       number: ch.number,
       title: ch.title,
       startPage: ch.start_page,
       endPage: ch.end_page,
       sections: (ch.sections || []).map((sec: any) => ({
         id: sec.id,
+        chapterId: sec.chapter_id,
         number: sec.number,
         title: sec.title,
         page: sec.page_number,
+        pageNumber: sec.page_number,
       })),
     }));
 
@@ -142,7 +150,7 @@ export async function PATCH(
     const body = await req.json();
     const { lastPageRead, title } = body;
 
-    const supabase = await createServerSupabaseClient() || createAdminClient();
+    const supabase = await createServerSupabaseClient();
     if (!supabase) {
       return NextResponse.json({ error: "Database client unavailable." }, { status: 500 });
     }
@@ -190,7 +198,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Access denied." }, { status: 403 });
     }
 
-    const supabase = await createServerSupabaseClient() || createAdminClient();
+    const supabase = await createServerSupabaseClient();
     if (!supabase) {
       return NextResponse.json({ error: "Database client unavailable." }, { status: 500 });
     }

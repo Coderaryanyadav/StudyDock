@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/supabase/auth";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
+import { submitQuizAttempt } from "@/lib/quizzes/service";
+import { recordStudyEvent } from "@/lib/progress/service";
 
 export async function POST(req: NextRequest) {
   try {
@@ -19,124 +19,64 @@ export async function POST(req: NextRequest) {
     const {
       quizId,
       bookId,
-      score = 0,
-      totalQuestions = 1,
-      concept = "Core Concept",
+      answers,
+      startedAt,
+      completedAt,
+      timeSpentSeconds,
+      concept,
       chapterTitle,
-      pageNumber = 1,
+      pageNumber,
     } = body;
 
-    const supabase = (await createServerSupabaseClient()) || createAdminClient();
-    if (!supabase) {
-      return NextResponse.json({ error: "Database unavailable." }, { status: 500 });
+    if (!quizId) {
+      return NextResponse.json({ error: "Quiz ID is required." }, { status: 400 });
     }
 
-    // 1. Ensure Quiz record exists if quizId was not provided or temporary
-    let validQuizId = quizId;
-    if (!validQuizId || validQuizId.startsWith("temp-") || validQuizId.startsWith("q-")) {
-      const { data: newQuiz } = await supabase
-        .from("quizzes")
-        .insert({
-          user_id: userId,
-          book_id: bookId || null,
-          title: `${concept} Assessment`,
-          total_questions: totalQuestions,
-        })
-        .select("id")
-        .single();
-
-      if (newQuiz) {
-        validQuizId = newQuiz.id;
+    if (bookId) {
+      const isOwner = await verifyBookOwnership(userId, bookId);
+      if (!isOwner) {
+        return NextResponse.json({ error: "Access denied. You do not own this textbook." }, { status: 403 });
       }
     }
 
-    // 2. Insert into quiz_attempts
-    if (validQuizId) {
-      await supabase.from("quiz_attempts").insert({
-        user_id: userId,
-        quiz_id: validQuizId,
-        score,
-        total_questions: totalQuestions,
-        completed_at: new Date().toISOString(),
-      });
-    }
-
-    // 3. Update or create Concept and Student Concept Mastery
-    if (concept) {
-      // Find or insert concept
-      let conceptId: string | null = null;
-      const { data: existingConcept } = await supabase
-        .from("concepts")
-        .select("id")
-        .eq("name", concept)
-        .single();
-
-      if (existingConcept) {
-        conceptId = existingConcept.id;
-      } else {
-        const { data: newConcept } = await supabase
-          .from("concepts")
-          .insert({
-            name: concept,
-            category: chapterTitle || "Academic Studies",
-          })
-          .select("id")
-          .single();
-
-        if (newConcept) {
-          conceptId = newConcept.id;
-        }
-      }
-
-      if (conceptId) {
-        // Fetch existing student_concept record
-        const { data: existingStudentConcept } = await supabase
-          .from("student_concepts")
-          .select("*")
-          .eq("user_id", userId)
-          .eq("concept_id", conceptId)
-          .single();
-
-        const prevAttempted = existingStudentConcept?.questions_attempted || 0;
-        const prevCorrect = existingStudentConcept?.questions_correct || 0;
-
-        const updatedAttempted = prevAttempted + totalQuestions;
-        const updatedCorrect = prevCorrect + score;
-        const calculatedMastery = updatedAttempted > 0
-          ? Math.min(100, Math.max(0, Math.round((updatedCorrect / updatedAttempted) * 100)))
-          : 50;
-
-        await supabase.from("student_concepts").upsert(
-          {
-            user_id: userId,
-            concept_id: conceptId,
-            mastery_percentage: calculatedMastery,
-            questions_attempted: updatedAttempted,
-            questions_correct: updatedCorrect,
-            is_weak: calculatedMastery < 60,
-            recommended_chapter: chapterTitle || `Chapter Review`,
-            recommended_page: pageNumber || 1,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "user_id,concept_id" }
-        );
-      }
-    }
-
-    // 4. Update Study Session Activity
-    await supabase.from("study_sessions").insert({
-      user_id: userId,
-      book_id: bookId || null,
-      duration_minutes: 2,
-      pages_read: 1,
-      questions_asked: 0,
+    const result = await submitQuizAttempt(userId, {
+      quizId,
+      bookId,
+      answers: Array.isArray(answers) ? answers : [],
+      startedAt,
+      completedAt,
+      timeSpentSeconds,
+      concept,
+      chapterTitle,
+      pageNumber: Number(pageNumber) || 1,
     });
+
+    if (!result) {
+      return NextResponse.json(
+        { error: "Failed to record quiz attempt or quiz not found." },
+        { status: 404 }
+      );
+    }
+
+    // Log tracking event
+    await recordStudyEvent(userId, {
+      bookId,
+      eventType: "quiz_completed",
+      pageNumber: Number(pageNumber) || 1,
+      durationSeconds: Number(timeSpentSeconds) || 0,
+      metadata: {
+        quizId,
+        score: result.score,
+        totalQuestions: result.totalQuestions,
+      },
+    }).catch(() => {});
 
     return NextResponse.json({
       success: true,
-      score,
-      totalQuestions,
-      concept,
+      attempt: result,
+      score: result.score,
+      totalQuestions: result.totalQuestions,
+      conceptMastery: result.conceptMastery,
     });
   } catch (error: any) {
     console.error("Quiz attempt API error:", error?.message || error);
@@ -146,3 +86,4 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+

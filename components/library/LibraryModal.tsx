@@ -148,10 +148,11 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
             <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
             <input
               type="text"
+              aria-label="Search Library Textbooks"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search by book title, author, or subject..."
-              className="w-full pl-9 pr-3 py-2 rounded-lg bg-[#070b12] border border-slate-800 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+              className="w-full pl-9 pr-3 py-2 rounded-lg bg-[#070b12] border border-slate-800 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-500"
             />
           </div>
         )}
@@ -184,7 +185,8 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
                     onClose();
                     onOpenUploadModal();
                   }}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition-colors"
+                  aria-label="Import First Textbook PDF"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Import First Textbook PDF</span>
@@ -192,7 +194,7 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5" role="list" aria-label="Library Textbooks">
               {filteredBooks.map((book) => {
                 const isSelected = activeBookId === book.id;
                 const progressPct = Math.round(
@@ -202,11 +204,21 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
                 return (
                   <div
                     key={book.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Open textbook ${book.title} (Page ${book.lastPageRead || 1} of ${book.totalPages})`}
                     onClick={() => {
                       onSelectBook(book.id);
                       onClose();
                     }}
-                    className={`p-4 rounded-lg border transition-all cursor-pointer flex gap-4 items-start ${
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onSelectBook(book.id);
+                        onClose();
+                      }
+                    }}
+                    className={`p-4 rounded-lg border transition-all cursor-pointer flex gap-4 items-start focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none ${
                       isSelected
                         ? "bg-indigo-950/30 border-indigo-500/60 shadow-sm"
                         : "bg-[#080c14] border-slate-800 hover:border-slate-700"
@@ -231,39 +243,58 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
                           <button
                             onClick={(e) => handleDeleteBook(e, book.id)}
                             disabled={deletingId === book.id}
-                            className="p-1 text-slate-500 hover:text-rose-400 transition-colors"
+                            aria-label={`Remove textbook ${book.title} from library`}
+                            className="p-1 text-slate-500 hover:text-rose-400 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:outline-none rounded"
                             title="Remove textbook"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                         <p className="text-xs text-slate-400 truncate">
-                          {book.author ? `by ${book.author}` : "Academic Textbook"}
+                          {book.author ? `by ${book.author}` : "Author Unknown"}
                         </p>
                       </div>
 
-                      {/* Progress bar */}
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
-                          <span>Progress</span>
-                          <span className="text-indigo-400 font-semibold">
-                            Page {book.lastPageRead || 1} / {book.totalPages} ({progressPct}%)
-                          </span>
+                      {/* Status indicator */}
+                      {book.status === "PROCESSING" || book.status === "EMBEDDING" || book.status === "UPLOADING" ? (
+                        <div className="flex items-center gap-1.5 text-[11px] text-amber-400 font-medium">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>{book.status === "EMBEDDING" ? "Generating Vector Embeddings..." : "Processing & Indexing..."}</span>
                         </div>
-                        <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                          <div
-                            style={{ width: `${progressPct}%` }}
-                            className="h-full bg-indigo-500 rounded-full"
-                          />
+                      ) : book.status === "OCR_REQUIRED" ? (
+                        <div className="flex items-center gap-1.5 text-[11px] text-amber-400 font-medium">
+                          <AlertCircle className="w-3.5 h-3.5" />
+                          <span>Scanned PDF (OCR Required)</span>
                         </div>
-                      </div>
+                      ) : book.status === "FAILED" ? (
+                        <div className="flex items-center gap-1.5 text-[11px] text-rose-400 font-medium">
+                          <AlertCircle className="w-3.5 h-3.5" />
+                          <span>Processing Failed</span>
+                        </div>
+                      ) : (
+                        /* Progress bar for READY books */
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
+                            <span>Progress</span>
+                            <span className="text-indigo-400 font-semibold">
+                              Page {book.lastPageRead || 1} / {book.totalPages} ({progressPct}% )
+                            </span>
+                          </div>
+                          <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                            <div
+                              style={{ width: `${progressPct}%` }}
+                              className="h-full bg-indigo-500 rounded-full"
+                            />
+                          </div>
+                        </div>
+                      )}
 
                       <div className="flex items-center justify-between pt-1 text-xs">
                         <span className="text-[10px] font-mono text-slate-500">
-                          {book.subject || "Course"}
+                          {book.subject || "General Studies"}
                         </span>
                         <span className="text-indigo-400 font-semibold flex items-center gap-1">
-                          <span>{isSelected ? "Active Book" : "Open Book"}</span>
+                          <span>{isSelected ? "Active Book" : book.status === "READY" ? "Open Book" : "View Status"}</span>
                           <ArrowRight className="w-3 h-3" />
                         </span>
                       </div>

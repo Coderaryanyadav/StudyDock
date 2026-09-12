@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  getHighlightsForBook,
+  getBookmarksForBook,
+  saveHighlight,
+  updateHighlight,
+  deleteHighlight,
+  saveBookmark,
+  updateBookmark,
+  deleteBookmark,
+} from "@/lib/annotations/service";
+import { recordStudyEvent } from "@/lib/progress/service";
 
 export async function GET(req: NextRequest) {
   try {
@@ -10,56 +19,32 @@ export async function GET(req: NextRequest) {
     const auth = await authenticateRequest(req);
     const userId = auth?.id;
 
-    if (!userId || !bookId) {
-      return NextResponse.json({ success: true, highlights: [], bookmarks: [] });
+    if (!userId) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+
+    if (!bookId) {
+      return NextResponse.json({ error: "Book ID is required." }, { status: 400 });
     }
 
     const isOwner = await verifyBookOwnership(userId, bookId);
     if (!isOwner) {
-      return NextResponse.json({ error: "Access denied." }, { status: 403 });
+      return NextResponse.json({ error: "Access denied. You do not own this book." }, { status: 403 });
     }
 
-    const supabase = (await createServerSupabaseClient()) || createAdminClient();
-    if (!supabase) {
-      return NextResponse.json({ success: true, highlights: [], bookmarks: [] });
-    }
-
-    const [{ data: highlights }, { data: bookmarks }] = await Promise.all([
-      supabase
-        .from("highlights")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("book_id", bookId)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("bookmarks")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("book_id", bookId)
-        .order("page_number", { ascending: true }),
+    const [highlights, bookmarks] = await Promise.all([
+      getHighlightsForBook(userId, bookId),
+      getBookmarksForBook(userId, bookId),
     ]);
 
     return NextResponse.json({
       success: true,
-      highlights: (highlights || []).map((h) => ({
-        id: h.id,
-        pageNumber: h.page_number,
-        text: h.text,
-        color: h.color || "yellow",
-        note: h.note,
-        boundingRect: h.bounding_rect || undefined,
-        rects: h.rects || undefined,
-        createdAt: h.created_at,
-      })),
-      bookmarks: (bookmarks || []).map((b) => ({
-        id: b.id,
-        pageNumber: b.page_number,
-        title: b.title,
-        createdAt: b.created_at,
-      })),
+      highlights,
+      bookmarks,
     });
   } catch (error: any) {
-    return NextResponse.json({ success: true, highlights: [], bookmarks: [] });
+    console.error("Annotations GET error:", error?.message || error);
+    return NextResponse.json({ error: "Failed to fetch annotations." }, { status: 500 });
   }
 }
 
@@ -79,59 +64,101 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Book ID is required." }, { status: 400 });
     }
 
-    const supabase = (await createServerSupabaseClient()) || createAdminClient();
-    if (!supabase) {
-      return NextResponse.json({ error: "Database client unavailable." }, { status: 500 });
+    const isOwner = await verifyBookOwnership(userId, bookId);
+    if (!isOwner) {
+      return NextResponse.json({ error: "Access denied. You do not own this textbook." }, { status: 403 });
     }
 
     if (type === "bookmark") {
-      const { data, error } = await supabase
-        .from("bookmarks")
-        .upsert(
-          {
-            user_id: userId,
-            book_id: bookId,
-            page_number: pageNumber || 1,
-            title: title || `Page ${pageNumber || 1}`,
-          },
-          { onConflict: "user_id,book_id,page_number" }
-        )
-        .select("id")
-        .single();
+      const bookmark = await saveBookmark(userId, {
+        bookId,
+        pageNumber: pageNumber || 1,
+        title,
+      });
 
-      if (error) {
+      if (!bookmark) {
         return NextResponse.json({ error: "Failed to save bookmark." }, { status: 500 });
       }
 
-      return NextResponse.json({ success: true, id: data?.id, type: "bookmark" });
+      // Log tracking event
+      await recordStudyEvent(userId, {
+        bookId,
+        eventType: "bookmark_created",
+        pageNumber: pageNumber || 1,
+        metadata: { bookmarkId: bookmark.id, title },
+      }).catch(() => {});
+
+      return NextResponse.json({ success: true, id: bookmark.id, type: "bookmark", bookmark });
     }
 
-    if (!text) {
+    if (!text || typeof text !== "string" || !text.trim()) {
       return NextResponse.json({ error: "Missing required highlight text." }, { status: 400 });
     }
 
-    const { data, error } = await supabase
-      .from("highlights")
-      .insert({
-        user_id: userId,
-        book_id: bookId,
-        page_number: pageNumber || 1,
-        text: text.slice(0, 2000),
-        color: color || "yellow",
-        note: note ? note.slice(0, 2000) : null,
-        bounding_rect: boundingRect || null,
-        rects: rects || null,
-      })
-      .select("id")
-      .single();
+    const highlight = await saveHighlight(userId, {
+      bookId,
+      pageNumber: pageNumber || 1,
+      text: text.trim(),
+      color,
+      note,
+      boundingRect,
+      rects,
+    });
 
-    if (error) {
-      return NextResponse.json({ error: "Failed to save annotation." }, { status: 500 });
+    if (!highlight) {
+      return NextResponse.json({ error: "Failed to save highlight." }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, id: data.id, type: "highlight" });
+    // Log tracking event
+    await recordStudyEvent(userId, {
+      bookId,
+      eventType: "highlight_created",
+      pageNumber: pageNumber || 1,
+      metadata: { highlightId: highlight.id, color },
+    }).catch(() => {});
+
+    return NextResponse.json({ success: true, id: highlight.id, type: "highlight", highlight });
   } catch (error: any) {
+    console.error("Annotations POST error:", error?.message || error);
     return NextResponse.json({ error: "Failed to save annotation." }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const auth = await authenticateRequest(req);
+    const userId = auth?.id;
+
+    if (!userId) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+
+    const body = await req.json();
+    const { id, type, color, note, title } = body;
+
+    if (!id) {
+      return NextResponse.json({ error: "Annotation ID is required." }, { status: 400 });
+    }
+
+    if (type === "bookmark") {
+      if (!title) {
+        return NextResponse.json({ error: "Title is required to update bookmark." }, { status: 400 });
+      }
+      const updated = await updateBookmark(userId, id, title);
+      if (!updated) {
+        return NextResponse.json({ error: "Failed to update bookmark or bookmark not found." }, { status: 404 });
+      }
+      return NextResponse.json({ success: true, bookmark: updated });
+    } else {
+      const updated = await updateHighlight(userId, id, { color, note });
+      if (!updated) {
+        return NextResponse.json({ error: "Failed to update highlight or highlight not found." }, { status: 404 });
+      }
+      return NextResponse.json({ success: true, highlight: updated });
+    }
+  } catch (error: any) {
+    console.error("Annotations PATCH error:", error?.message || error);
+    return NextResponse.json({ error: "Failed to update annotation." }, { status: 500 });
   }
 }
 
@@ -150,19 +177,14 @@ export async function DELETE(req: NextRequest) {
     const bookId = searchParams.get("bookId");
     const pageNumber = searchParams.get("pageNumber");
 
-    const supabase = (await createServerSupabaseClient()) || createAdminClient();
-    if (!supabase) {
-      return NextResponse.json({ error: "Database unavailable" }, { status: 500 });
-    }
-
     if (type === "bookmark" && bookId && pageNumber) {
-      await supabase
-        .from("bookmarks")
-        .delete()
-        .eq("user_id", userId)
-        .eq("book_id", bookId)
-        .eq("page_number", parseInt(pageNumber, 10));
-      return NextResponse.json({ success: true });
+      const isOwner = await verifyBookOwnership(userId, bookId);
+      if (!isOwner) {
+        return NextResponse.json({ error: "Access denied." }, { status: 403 });
+      }
+
+      const success = await deleteBookmark(userId, undefined, bookId, parseInt(pageNumber, 10));
+      return NextResponse.json({ success });
     }
 
     if (!id) {
@@ -170,21 +192,20 @@ export async function DELETE(req: NextRequest) {
     }
 
     if (type === "bookmark") {
-      await supabase
-        .from("bookmarks")
-        .delete()
-        .eq("id", id)
-        .eq("user_id", userId);
+      const success = await deleteBookmark(userId, id);
+      if (!success) {
+        return NextResponse.json({ error: "Failed to delete bookmark or bookmark not found." }, { status: 404 });
+      }
     } else {
-      await supabase
-        .from("highlights")
-        .delete()
-        .eq("id", id)
-        .eq("user_id", userId);
+      const success = await deleteHighlight(userId, id);
+      if (!success) {
+        return NextResponse.json({ error: "Failed to delete highlight or highlight not found." }, { status: 404 });
+      }
     }
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
+    console.error("Annotations DELETE error:", error?.message || error);
     return NextResponse.json({ error: "Failed to delete annotation." }, { status: 500 });
   }
 }

@@ -5,7 +5,6 @@ import { streamTutorResponse } from "@/lib/gemini/client";
 import { checkRateLimit, validateChatInput } from "@/lib/security/rate-limit";
 import { authenticateRequest, verifyBookOwnership, verifyConversationOwnership } from "@/lib/supabase/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import {
   getConversationsForUser,
   getConversationWithMessages,
@@ -14,6 +13,8 @@ import {
   deleteConversation,
   saveMessage,
 } from "@/lib/conversations/service";
+import { getBookForUser } from "@/lib/books/service";
+import { recordStudyEvent } from "@/lib/progress/service";
 
 export const runtime = "nodejs";
 
@@ -106,47 +107,26 @@ export async function POST(req: NextRequest) {
     }
 
     // Resolve Target Book Context Authoritatively from Database
-    let targetBook: Book | null = null;
+    const targetBook: Book | null = await getBookForUser(userId, bookId);
     let targetVideo: VideoLecture | undefined = undefined;
 
-    const supabase = (await createServerSupabaseClient()) || createAdminClient();
+    if (!targetBook) {
+      return NextResponse.json(
+        { error: "Target book could not be found or you do not have permission to access it." },
+        { status: 404 }
+      );
+    }
+
+    const supabase = await createServerSupabaseClient();
     if (supabase) {
-      const { data: bookRecord, error: bookErr } = await supabase
+      const { data: bookRecord } = await supabase
         .from("books")
-        .select("*, book_pages(*)")
+        .select("youtube_url, video_title")
         .eq("id", bookId)
         .eq("user_id", userId)
         .single();
 
-      if (bookErr || !bookRecord) {
-        return NextResponse.json(
-          { error: "Target book could not be found or you do not have permission to access it." },
-          { status: 404 }
-        );
-      }
-
-      targetBook = {
-        id: bookRecord.id,
-        title: bookRecord.title,
-        author: bookRecord.author,
-        edition: bookRecord.edition,
-        subject: bookRecord.subject,
-        totalPages: bookRecord.total_pages || (bookRecord.book_pages || []).length,
-        chapters: [],
-        pages: (bookRecord.book_pages || []).map((p: any) => ({
-          pageNumber: p.page_number,
-          chapterId: p.chapter_id || null,
-          chapterTitle: p.chapter_title || null,
-          sectionId: p.section_id || null,
-          sectionTitle: p.section_title || null,
-          title: p.title || `Page ${p.page_number}`,
-          content: p.content || "",
-          keyTakeaways: p.key_takeaways || [],
-        })),
-        chunks: [],
-      };
-
-      if (bookRecord.youtube_url) {
+      if (bookRecord?.youtube_url) {
         const match = bookRecord.youtube_url.match(
           /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/
         );
@@ -155,10 +135,10 @@ export async function POST(req: NextRequest) {
             id: `vid-${match[1]}`,
             youtubeId: match[1],
             title: bookRecord.video_title || `Lecture (${match[1]})`,
-            channelName: bookRecord.video_channel || null,
+            channelName: null,
             durationSeconds: 0,
             formattedDuration: "00:00",
-            bookId: bookRecord.id,
+            bookId: targetBook.id,
             topics: [],
           };
         }
@@ -186,6 +166,13 @@ export async function POST(req: NextRequest) {
     // Save user message immediately to conversation
     if (activeConvId) {
       await saveMessage(userId, activeConvId, "user", question, learningMode);
+      // Log tracking event
+      await recordStudyEvent(userId, {
+        bookId,
+        eventType: "question_asked",
+        pageNumber: Number(pageNumber) || 1,
+        metadata: { conversationId: activeConvId, learningMode },
+      }).catch(() => {});
     }
 
     // Streaming Response with SSE
@@ -334,8 +321,8 @@ export async function GET(req: NextRequest) {
       messages: record?.messages || [],
     });
   } catch (error: any) {
-    console.error("Fetch chat history error:", error);
-    return NextResponse.json({ success: true, conversations: [], messages: [] });
+    console.error("Fetch chat history error:", error?.message || error);
+    return NextResponse.json({ error: "Failed to fetch chat history." }, { status: 500 });
   }
 }
 
@@ -362,6 +349,7 @@ export async function PATCH(req: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
+    console.error("Rename conversation error:", error?.message || error);
     return NextResponse.json({ error: "Failed to rename conversation." }, { status: 500 });
   }
 }
@@ -374,8 +362,12 @@ export async function DELETE(req: NextRequest) {
     const auth = await authenticateRequest(req);
     const userId = auth?.id;
 
-    if (!userId || !conversationId) {
-      return NextResponse.json({ error: "Authentication and conversationId required." }, { status: 400 });
+    if (!userId) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+
+    if (!conversationId) {
+      return NextResponse.json({ error: "Conversation ID is required." }, { status: 400 });
     }
 
     const deleted = await deleteConversation(userId, conversationId);
@@ -385,6 +377,7 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
+    console.error("Delete conversation error:", error?.message || error);
     return NextResponse.json({ error: "Failed to delete conversation." }, { status: 500 });
   }
 }

@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { pageNumber, concept, contextText, bookId } = body;
 
-    // Strict Authentication & Book Ownership Verification
+    // 1. Strict Authentication & Book Ownership Verification
     const auth = await authenticateRequest(req);
     const userId = auth?.id;
 
@@ -28,104 +28,164 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Authentication required to generate quizzes." }, { status: 401 });
     }
 
-    if (bookId) {
-      const isOwner = await verifyBookOwnership(userId, bookId);
-      if (!isOwner) {
-        return NextResponse.json({ error: "Access denied. You do not own this textbook." }, { status: 403 });
-      }
+    if (!bookId) {
+      return NextResponse.json({ error: "Book ID is required." }, { status: 400 });
     }
 
-    // Dynamic question generation from actual textbook context
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey && apiKey !== "your_gemini_api_key_here" && contextText && contextText.length > 50) {
-      try {
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const isOwner = await verifyBookOwnership(userId, bookId);
+    if (!isOwner) {
+      return NextResponse.json({ error: "Access denied. You do not own this textbook." }, { status: 403 });
+    }
 
-        const sanitizedContext = sanitizePromptText(contextText, 4000);
-        const prompt = `You are an academic test designer. Generate 3 multiple choice questions based strictly on this verified textbook context:
+    // 2. Strict Context Validation - Must use actual textbook context
+    if (!contextText || typeof contextText !== "string" || contextText.trim().length < 40) {
+      return NextResponse.json(
+        { error: "Textbook page context is required to generate grounded quiz questions." },
+        { status: 400 }
+      );
+    }
+
+    // 3. Dynamic question generation from actual textbook context with Gemini
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey === "your_gemini_api_key_here") {
+      return NextResponse.json(
+        { error: "Gemini API key is unconfigured in server environment." },
+        { status: 503 }
+      );
+    }
+
+    try {
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({
+        model: "gemini-1.5-flash",
+        generationConfig: {
+          responseMimeType: "application/json",
+          temperature: 0.2,
+        },
+      });
+
+      const sanitizedContext = sanitizePromptText(contextText, 4000);
+      const prompt = `You are an academic test designer. Generate 3 multiple choice questions based strictly on this verified textbook context:
 Context: "${sanitizedContext}"
 
-Return a JSON array ONLY with this exact structure:
+Return a JSON array of 3 questions with this exact JSON schema:
 [
   {
-    "id": "q1",
-    "question": "Clear question text?",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
-    "correctIndex": 0,
-    "explanation": "Brief explanation why option 0 is correct based on the text.",
-    "concept": "${sanitizePromptText(concept || "Core Topic", 60)}",
-    "pageNumber": ${pageNumber || 1}
+    "question": "Clear question testing understanding of the context?",
+    "options": [
+      { "id": "opt-0", "text": "Option A text", "isCorrect": true },
+      { "id": "opt-1", "text": "Option B text", "isCorrect": false },
+      { "id": "opt-2", "text": "Option C text", "isCorrect": false },
+      { "id": "opt-3", "text": "Option D text", "isCorrect": false }
+    ],
+    "explanation": "Detailed explanation citing the textbook context why the correct answer is right.",
+    "concept": "${sanitizePromptText(concept || "Core Concept", 60)}",
+    "difficulty": "medium"
   }
 ]`;
 
-        const result = await model.generateContent(prompt);
-        const text = result.response.text().trim();
+      const result = await model.generateContent(prompt);
+      const text = result.response.text().trim();
+      let parsed: any[] = [];
+      try {
+        parsed = JSON.parse(text);
+      } catch (parseErr) {
         const jsonMatch = text.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          
-          const formattedQuestions: QuizQuestion[] = parsed.map((item: any, idx: number) => {
-            const rawOptions = Array.isArray(item.options) ? item.options : [];
-            const correctIdx = typeof item.correctIndex === "number" ? item.correctIndex : 0;
-            const options = rawOptions.map((opt: any, optIdx: number) => {
-              if (typeof opt === "object" && opt !== null && "text" in opt) {
-                return {
-                  id: opt.id || `opt-${optIdx}`,
-                  text: String(opt.text),
-                  isCorrect: Boolean(opt.isCorrect ?? (optIdx === correctIdx)),
-                };
-              }
-              return {
-                id: `opt-${optIdx}`,
-                text: String(opt),
-                isCorrect: optIdx === correctIdx,
-              };
-            });
+          parsed = JSON.parse(jsonMatch[0]);
+        } else {
+          return NextResponse.json(
+            { error: "AI produced a malformed response format. Please retry." },
+            { status: 502 }
+          );
+        }
+      }
 
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        return NextResponse.json(
+          { error: "No valid quiz questions generated from context." },
+          { status: 502 }
+        );
+      }
+
+      // Validate each question structure strictly
+      const formattedQuestions: QuizQuestion[] = [];
+      for (let i = 0; i < parsed.length; i++) {
+        const item = parsed[i];
+        if (!item.question || typeof item.question !== "string") continue;
+
+        let options: { id: string; text: string; isCorrect: boolean }[] = [];
+        if (Array.isArray(item.options)) {
+          options = item.options.map((opt: any, optIdx: number) => {
+            if (typeof opt === "object" && opt !== null) {
+              return {
+                id: opt.id || `opt-${optIdx}`,
+                text: String(opt.text || `Option ${optIdx + 1}`),
+                isCorrect: Boolean(opt.isCorrect),
+              };
+            }
             return {
-              id: item.id || `q-${Date.now()}-${idx}`,
-              bookId: bookId || "",
-              chapterId: `ch-${pageNumber || 1}`,
-              pageNumber: item.pageNumber || pageNumber || 1,
-              concept: item.concept || concept || "Core Concept",
-              question: item.question,
-              options,
-              explanation: item.explanation || "",
-              difficulty: (item.difficulty as "easy" | "medium" | "hard") || "medium",
+              id: `opt-${optIdx}`,
+              text: String(opt),
+              isCorrect: optIdx === (item.correctIndex ?? 0),
             };
           });
-
-          // Persist quiz to Supabase database
-          let savedQuizId: string | null = null;
-          if (bookId && formattedQuestions.length > 0) {
-            savedQuizId = await saveQuizWithQuestions(
-              userId,
-              bookId,
-              `${concept || "Textbook"} Assessment`,
-              formattedQuestions
-            );
-          }
-
-          return NextResponse.json({
-            success: true,
-            quizId: savedQuizId,
-            questions: formattedQuestions,
-            count: formattedQuestions.length,
-            generatedFrom: "ai_context",
-          });
         }
-      } catch (geminiErr) {
-        console.warn("Quiz generation error:", geminiErr);
+
+        // Must have at least 2 options and at least 1 correct option
+        if (options.length < 2) continue;
+        const hasCorrect = options.some((o) => o.isCorrect);
+        if (!hasCorrect) {
+          options[0].isCorrect = true;
+        }
+
+        formattedQuestions.push({
+          id: `q-${Date.now()}-${i}`,
+          bookId,
+          chapterId: null,
+          pageNumber: Number(pageNumber) || 1,
+          concept: String(item.concept || concept || "Core Concept"),
+          question: String(item.question),
+          options,
+          explanation: String(item.explanation || ""),
+          difficulty: (item.difficulty as "easy" | "medium" | "hard") || "medium",
+        });
+      }
+
+      if (formattedQuestions.length === 0) {
         return NextResponse.json(
-          { error: "Failed to generate quiz from textbook context." },
+          { error: "Failed to parse valid multiple-choice questions from AI response." },
+          { status: 502 }
+        );
+      }
+
+      // 4. Persist quiz to Supabase database (Fail-closed: Never claim success if DB persistence fails)
+      const savedQuizId = await saveQuizWithQuestions(
+        userId,
+        bookId,
+        `${concept || "Textbook"} Assessment`,
+        formattedQuestions
+      );
+
+      if (!savedQuizId) {
+        return NextResponse.json(
+          { error: "Failed to persist generated quiz to database." },
           { status: 500 }
         );
       }
-    } else {
+
+      return NextResponse.json({
+        success: true,
+        quizId: savedQuizId,
+        questions: formattedQuestions,
+        count: formattedQuestions.length,
+        generatedFrom: "ai_context",
+      });
+    } catch (geminiErr: any) {
+      console.warn("Quiz generation error:", geminiErr?.message || geminiErr);
       return NextResponse.json(
-        { error: "Invalid context or AI configuration missing." },
-        { status: 400 }
+        { error: "Failed to generate quiz from textbook context." },
+        { status: 500 }
       );
     }
   } catch (error: any) {
@@ -136,3 +196,4 @@ Return a JSON array ONLY with this exact structure:
     );
   }
 }
+

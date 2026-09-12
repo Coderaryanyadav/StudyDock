@@ -24,7 +24,7 @@ import {
   Trash2,
   Plus,
 } from "lucide-react";
-import { Book, BookPage, Highlight, LearningMode, Note } from "@/types";
+import { Book, BookPage, Highlight, HighlightRect, LearningMode, Note } from "@/types";
 import { TextbookSelectionToolbar } from "./TextbookSelectionToolbar";
 import { PdfViewer } from "./PdfViewer";
 import { renderMathInText } from "@/lib/katex-renderer";
@@ -63,6 +63,10 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState<string>("");
   const [selectedHighlightColor, setSelectedHighlightColor] = useState<"yellow" | "green" | "blue" | "pink">("yellow");
+  const [pendingSelectionCoords, setPendingSelectionCoords] = useState<{
+    boundingRect?: HighlightRect;
+    rects?: HighlightRect[];
+  } | null>(null);
   
   const [selectionToolbarPos, setSelectionToolbarPos] = useState<{ x: number; y: number } | null>(null);
   const [selectedText, setSelectedText] = useState<string>("");
@@ -74,6 +78,17 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
   useEffect(() => {
     setPageInputVal(String(activePageNumber));
   }, [activePageNumber]);
+
+  // Persist current page to database for resume functionality
+  useEffect(() => {
+    if (book?.id && activePageNumber >= 1) {
+      fetch(`/api/books/${encodeURIComponent(book.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lastPageRead: activePageNumber }),
+      }).catch(() => {});
+    }
+  }, [book?.id, activePageNumber]);
 
   const handlePageInputSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -160,29 +175,42 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
 
   const handleCreateHighlight = async (color: "yellow" | "green" | "blue" | "pink") => {
     if (!selectedText.trim() || !book?.id) return;
+    const tempId = `hl-${Date.now()}`;
     const newHighlight: Highlight = {
-      id: `hl-${Date.now()}`,
+      id: tempId,
       bookId: book.id,
       pageNumber: activePageNumber,
       text: selectedText,
       color,
+      boundingRect: pendingSelectionCoords?.boundingRect || null,
+      rects: pendingSelectionCoords?.rects || [],
       createdAt: new Date().toISOString(),
     };
 
     setHighlights((prev) => [...prev, newHighlight]);
     setSelectionToolbarPos(null);
 
-    await fetch("/api/annotations", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        bookId: book.id,
-        type: "highlight",
-        pageNumber: activePageNumber,
-        text: selectedText,
-        color,
-      }),
-    }).catch(() => {});
+    try {
+      const res = await fetch("/api/annotations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookId: book.id,
+          type: "highlight",
+          pageNumber: activePageNumber,
+          text: selectedText,
+          color,
+          boundingRect: pendingSelectionCoords?.boundingRect || null,
+          rects: pendingSelectionCoords?.rects || [],
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.id) {
+        setHighlights((prev) => prev.map((h) => (h.id === tempId ? { ...h, id: data.id } : h)));
+      }
+    } catch (err) {
+      console.warn("Failed to save highlight:", err);
+    }
   };
 
   const handleDeleteHighlight = async (highlightId: string) => {
@@ -294,10 +322,13 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
               setShowHighlights(false);
               setShowNotes(false);
             }}
-            className={`p-1.5 rounded-md transition-colors flex items-center gap-1.5 ${
-              showToc ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800"
+            data-testid="toc-drawer-btn"
+            aria-label="Toggle Table of Contents"
+            aria-expanded={showToc}
+            className={`p-1.5 rounded-md transition-colors flex items-center gap-1.5 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none ${
+              showToc ? "bg-indigo-600 text-white shadow-sm" : "text-slate-300 hover:bg-slate-800 hover:text-white"
             }`}
-            title="Table of Contents"
+            title="Table of Contents (B)"
           >
             <ListTree className="w-4 h-4" />
             <span className="hidden sm:inline font-medium">Contents</span>
@@ -310,13 +341,16 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
               setShowHighlights(false);
               setShowNotes(false);
             }}
-            className={`p-1.5 rounded-md transition-colors flex items-center gap-1 ${
-              showBookmarks ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800"
+            data-testid="bookmarks-drawer-btn"
+            aria-label="View Saved Bookmarks"
+            aria-expanded={showBookmarks}
+            className={`p-1.5 rounded-md transition-colors flex items-center gap-1 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none ${
+              showBookmarks ? "bg-indigo-600 text-white shadow-sm" : "text-slate-300 hover:bg-slate-800 hover:text-white"
             }`}
             title="Bookmarks"
           >
             <Bookmark className="w-4 h-4" />
-            <span className="font-mono text-[11px] font-semibold">({bookmarks.length})</span>
+            <span className="font-mono text-[11px] font-semibold" data-testid="bookmarks-count">({bookmarks.length})</span>
           </button>
 
           <button
@@ -326,13 +360,16 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
               setShowBookmarks(false);
               setShowNotes(false);
             }}
-            className={`p-1.5 rounded-md transition-colors flex items-center gap-1 ${
-              showHighlights ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800"
+            data-testid="highlights-drawer-btn"
+            aria-label="View Highlights"
+            aria-expanded={showHighlights}
+            className={`p-1.5 rounded-md transition-colors flex items-center gap-1 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none ${
+              showHighlights ? "bg-indigo-600 text-white shadow-sm" : "text-slate-300 hover:bg-slate-800 hover:text-white"
             }`}
             title="Highlights"
           >
             <Highlighter className="w-4 h-4" />
-            <span className="font-mono text-[11px] font-semibold">({highlights.length})</span>
+            <span className="font-mono text-[11px] font-semibold" data-testid="highlights-count">({highlights.length})</span>
           </button>
 
           <button
@@ -342,13 +379,16 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
               setShowBookmarks(false);
               setShowHighlights(false);
             }}
-            className={`p-1.5 rounded-md transition-colors flex items-center gap-1 ${
-              showNotes ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800"
+            data-testid="notes-drawer-btn"
+            aria-label="View Study Notes"
+            aria-expanded={showNotes}
+            className={`p-1.5 rounded-md transition-colors flex items-center gap-1 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none ${
+              showNotes ? "bg-indigo-600 text-white shadow-sm" : "text-slate-300 hover:bg-slate-800 hover:text-white"
             }`}
             title="Study Notes"
           >
             <FileText className="w-4 h-4" />
-            <span className="font-mono text-[11px] font-semibold">({notes.length})</span>
+            <span className="font-mono text-[11px] font-semibold" data-testid="notes-count">({notes.length})</span>
           </button>
         </div>
 
@@ -357,7 +397,9 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
           <button
             onClick={() => onPageChange(Math.max(1, activePageNumber - 1))}
             disabled={activePageNumber <= 1}
-            className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
+            data-testid="prev-page-btn"
+            aria-label="Previous Page"
+            className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
             title="Previous Page (←)"
           >
             <ChevronLeft className="w-4 h-4" />
@@ -366,9 +408,11 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
           <form onSubmit={handlePageInputSubmit} className="flex items-center gap-1">
             <input
               type="text"
+              data-testid="page-number-input"
+              aria-label="Current Page Number"
               value={pageInputVal}
               onChange={(e) => setPageInputVal(e.target.value)}
-              className="w-9 h-6 bg-slate-800 text-center font-mono font-bold text-white text-xs rounded border border-slate-700 focus:outline-none focus:border-indigo-500"
+              className="w-10 h-6 bg-slate-800 text-center font-mono font-bold text-white text-xs rounded border border-slate-700 focus:outline-none focus:border-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-500"
             />
             <span className="text-slate-500 font-mono text-[11px]">/ {totalPagesCount}</span>
           </form>
@@ -376,7 +420,9 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
           <button
             onClick={() => onPageChange(Math.min(totalPagesCount, activePageNumber + 1))}
             disabled={activePageNumber >= totalPagesCount}
-            className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
+            data-testid="next-page-btn"
+            aria-label="Next Page"
+            className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
             title="Next Page (→)"
           >
             <ChevronRight className="w-4 h-4" />
@@ -387,7 +433,9 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
         <div className="flex items-center gap-1.5">
           <button
             onClick={toggleBookmark}
-            className={`p-1.5 rounded-md transition-colors ${
+            data-testid="bookmark-toggle-btn"
+            aria-label={isCurrentPageBookmarked ? "Remove Bookmark" : "Bookmark this page"}
+            className={`p-1.5 rounded-md transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none ${
               isCurrentPageBookmarked
                 ? "text-amber-400 bg-amber-400/10 border border-amber-400/30"
                 : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
@@ -404,7 +452,8 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
           <div className="hidden sm:flex items-center gap-1 border-l border-slate-800 pl-1.5">
             <button
               onClick={() => setZoomLevel((prev) => Math.max(50, prev - 10))}
-              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              aria-label="Zoom Out"
+              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
               title="Zoom Out"
             >
               <ZoomOut className="w-3.5 h-3.5" />
@@ -414,7 +463,8 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
             </span>
             <button
               onClick={() => setZoomLevel((prev) => Math.min(200, prev + 10))}
-              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              aria-label="Zoom In"
+              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
               title="Zoom In"
             >
               <ZoomIn className="w-3.5 h-3.5" />
@@ -423,7 +473,8 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
 
           <button
             onClick={() => setViewMode(viewMode === "pdf" ? "text" : "pdf")}
-            className="hidden md:flex items-center gap-1 px-2 py-1 rounded-md bg-slate-800/80 hover:bg-slate-800 text-slate-300 text-[11px] font-medium transition-colors border border-slate-700/60"
+            aria-label={`Switch to ${viewMode === "pdf" ? "Text" : "PDF"} mode`}
+            className="hidden md:flex items-center gap-1 px-2 py-1 rounded-md bg-slate-800/80 hover:bg-slate-800 text-slate-300 text-[11px] font-medium transition-colors border border-slate-700/60 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
           >
             <Eye className="w-3.5 h-3.5 text-indigo-400" />
             <span>{viewMode === "pdf" ? "Text" : "PDF"}</span>
@@ -572,6 +623,7 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
           <div className="p-3 border-b border-slate-800/80 bg-slate-950/60 space-y-2">
             <div className="text-[11px] text-slate-400 font-medium">Add note for Page {activePageNumber}:</div>
             <textarea
+              data-testid="new-note-input"
               value={newNoteContent}
               onChange={(e) => setNewNoteContent(e.target.value)}
               placeholder="Type your study notes, key takeaways, or equations..."
@@ -581,6 +633,7 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
             <button
               onClick={handleSaveNote}
               disabled={!newNoteContent.trim()}
+              data-testid="save-note-btn"
               className="w-full py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -670,15 +723,18 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
         className="flex-1 overflow-y-auto p-4 md:p-8 flex justify-center bg-[#070b12] custom-scrollbar"
       >
         {viewMode === "pdf" ? (
-          <div
-            style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: "top center" }}
-            className="transition-transform duration-100 w-full flex justify-center"
-          >
+          <div className="w-full flex justify-center">
             <PdfViewer
               bookId={book.id}
               pageNumber={activePageNumber}
               scale={zoomLevel / 100}
               onPageChange={onPageChange}
+              onSelectionCoords={(coords) => {
+                setPendingSelectionCoords({
+                  boundingRect: coords.boundingRect,
+                  rects: coords.rects,
+                });
+              }}
               highlights={highlights.filter((h) => h.pageNumber === activePageNumber)}
               totalPages={totalPagesCount}
             />

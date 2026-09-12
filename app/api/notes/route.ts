@@ -6,6 +6,7 @@ import {
   updateNote,
   deleteNote,
 } from "@/lib/notes/service";
+import { recordStudyEvent } from "@/lib/progress/service";
 
 export async function GET(req: NextRequest) {
   try {
@@ -14,20 +15,24 @@ export async function GET(req: NextRequest) {
     const auth = await authenticateRequest(req);
     const userId = auth?.id;
 
-    if (!userId || !bookId) {
-      return NextResponse.json({ success: true, notes: [] });
+    if (!userId) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+
+    if (!bookId) {
+      return NextResponse.json({ error: "Book ID is required." }, { status: 400 });
     }
 
     const isOwner = await verifyBookOwnership(userId, bookId);
     if (!isOwner) {
-      return NextResponse.json({ error: "Access denied." }, { status: 403 });
+      return NextResponse.json({ error: "Access denied. You do not own this book." }, { status: 403 });
     }
 
     const notes = await getNotesForBook(userId, bookId);
     return NextResponse.json({ success: true, notes });
   } catch (error: any) {
     console.error("Notes GET error:", error?.message || error);
-    return NextResponse.json({ success: true, notes: [] });
+    return NextResponse.json({ error: "Failed to retrieve notes." }, { status: 500 });
   }
 }
 
@@ -63,6 +68,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Failed to persist note." }, { status: 500 });
     }
 
+    // Log tracking event
+    await recordStudyEvent(userId, {
+      bookId,
+      eventType: "note_created",
+      pageNumber: pageNumber || 1,
+      metadata: { noteId: note.id },
+    }).catch(() => {});
+
     return NextResponse.json({ success: true, note });
   } catch (error: any) {
     console.error("Notes POST error:", error?.message || error);
@@ -88,7 +101,7 @@ export async function PATCH(req: NextRequest) {
 
     const updated = await updateNote(userId, id, content);
     if (!updated) {
-      return NextResponse.json({ error: "Failed to update note." }, { status: 500 });
+      return NextResponse.json({ error: "Failed to update note or note not found." }, { status: 404 });
     }
 
     return NextResponse.json({ success: true, note: updated });
@@ -116,7 +129,7 @@ export async function DELETE(req: NextRequest) {
 
     const deleted = await deleteNote(userId, id);
     if (!deleted) {
-      return NextResponse.json({ error: "Failed to delete note." }, { status: 500 });
+      return NextResponse.json({ error: "Failed to delete note or note not found." }, { status: 404 });
     }
 
     return NextResponse.json({ success: true });

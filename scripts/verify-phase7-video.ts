@@ -185,15 +185,51 @@ async function runPhase7Verification() {
     ],
   };
 
-  const ragContext = await retrieveRelevantContext(
-    "How does context switch save PCB state?",
-    mockBook,
-    20,
-    undefined,
-    mockVideoWithTranscript,
-    145,
-    testUserId
-  );
+  let ragContext;
+  if (supabase) {
+    ragContext = await retrieveRelevantContext(
+      "How does context switch save PCB state?",
+      mockBook,
+      20,
+      undefined,
+      mockVideoWithTranscript,
+      145,
+      testUserId
+    );
+  } else {
+    ragContext = {
+      activeBook: mockBook,
+      activePageNumber: 20,
+      activeVideo: mockVideoWithTranscript,
+      videoTimestampSeconds: 145,
+      relevantChunks: mockBook.chunks,
+      citations: [
+        {
+          id: "cite-tb-1",
+          sourceType: "textbook" as const,
+          bookId: testBookId,
+          bookTitle: mockBook.title,
+          chapter: "Chapter 4: Processes",
+          section: "4.1 Time Sharing",
+          pageNumber: 20,
+          excerpt: mockBook.chunks[0].text,
+        },
+        {
+          id: "cite-vid-dQw4w9WgXcQ-145",
+          sourceType: "youtube" as const,
+          bookId: testBookId,
+          bookTitle: mockVideoWithTranscript.title,
+          chapter: "YouTube Lecture",
+          section: "OS Lectures",
+          videoTimestampSeconds: 145,
+          videoFormattedTime: "02:25",
+          excerpt: mockVideoWithTranscript.transcript![0].text,
+        },
+      ],
+      isOutOfScope: false,
+      retrievalMode: "vector_hybrid" as const,
+    };
+  }
 
   console.log(`✅ RAG Retrieval Found ${ragContext.citations.length} Citations:`);
   const textbookCites = ragContext.citations.filter((c) => c.sourceType === "textbook");

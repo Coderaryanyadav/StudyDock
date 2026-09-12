@@ -46,6 +46,7 @@ export default function Home() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
 
   // Dynamic Quiz & Flashcards state
+  const [activeQuizId, setActiveQuizId] = useState<string | null>(null);
   const [quizQuestions, setQuizQuestions] = useState<any[]>([]);
   const [flashcards, setFlashcards] = useState<any[]>([]);
 
@@ -80,44 +81,70 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Active Study Session Tracker (tracks real study minutes only when browser tab is active)
+  // Active Study Session & Page Tracking (tracks real study time only when tab is visible)
   useEffect(() => {
     if (!activeBook?.id || currentView !== "workspace") return;
 
-    let elapsedSeconds = 0;
+    // 1. Log page_opened event when navigating to a page
+    fetch("/api/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        eventType: "page_opened",
+        bookId: activeBook.id,
+        pageNumber: activePageNumber,
+      }),
+    }).catch(() => {});
+
+    let secondsOnPage = 0;
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") {
-        elapsedSeconds += 15;
-        if (elapsedSeconds >= 120) {
+        secondsOnPage += 15;
+        // Heartbeat every 60s
+        if (secondsOnPage >= 60) {
           fetch("/api/progress", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               bookId: activeBook.id,
-              durationSeconds: elapsedSeconds,
-              pagesRead: 1,
+              durationSeconds: secondsOnPage,
+              pageNumber: activePageNumber,
             }),
           }).catch(() => {});
-          elapsedSeconds = 0;
+          secondsOnPage = 0;
         }
       }
     }, 15000);
 
     return () => {
       clearInterval(interval);
-      if (elapsedSeconds >= 30) {
+      if (secondsOnPage >= 15) {
+        // Record completed or page_time event on unmount/page change
         fetch("/api/progress", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             bookId: activeBook.id,
-            durationSeconds: elapsedSeconds,
-            pagesRead: 1,
+            durationSeconds: secondsOnPage,
+            pageNumber: activePageNumber,
           }),
         }).catch(() => {});
+
+        if (secondsOnPage >= 45) {
+          fetch("/api/events", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              eventType: "page_completed",
+              bookId: activeBook.id,
+              pageNumber: activePageNumber,
+              durationSeconds: secondsOnPage,
+            }),
+          }).catch(() => {});
+        }
       }
     };
-  }, [activeBook?.id, currentView]);
+  }, [activeBook?.id, activePageNumber, currentView]);
 
   const fetchUserProgress = async () => {
     try {
@@ -127,9 +154,20 @@ export default function Home() {
         setStudentProgress((prev) => ({
           ...prev,
           totalStudyMinutes: data.totalStudyMinutes || 0,
+          totalStudySeconds: data.totalStudySeconds || 0,
           streakDays: data.streakDays || 0,
+          longestStreakDays: data.longestStreakDays || 0,
+          chaptersCompleted: data.chaptersCompleted || 0,
+          videosWatched: data.videosWatched || 0,
+          quizzesCompleted: data.quizzesCompleted || 0,
           questionsAsked: data.questionsAsked || 0,
+          flashcardsReviewed: data.flashcardsReviewed || 0,
+          pagesRead: data.pagesRead || 0,
+          bookProgressPercentage: data.bookProgressPercentage || 0,
+          activeSubject: data.activeSubject || prev.activeSubject,
           concepts: data.concepts || [],
+          todayPlan: data.todayPlan || [],
+          recentActivity: data.recentActivity || [],
         }));
       }
     } catch (err) {
@@ -262,15 +300,19 @@ export default function Home() {
         });
         const data = await res.json();
         if (res.ok && data.success && data.questions?.length > 0) {
+          setActiveQuizId(data.quizId || null);
           setQuizQuestions(data.questions);
         } else {
+          setActiveQuizId(null);
           setQuizQuestions([]);
         }
       } catch (err) {
         console.warn("Quiz generation note:", err);
+        setActiveQuizId(null);
         setQuizQuestions([]);
       }
     } else {
+      setActiveQuizId(null);
       setQuizQuestions([]);
     }
   };
@@ -311,26 +353,40 @@ export default function Home() {
     setCurrentView("workspace");
   };
 
-  const handleQuizFinish = async (score: number, total: number, concept?: string) => {
-    setStudentProgress((prev) => ({
-      ...prev,
-      quizzesCompleted: prev.quizzesCompleted + 1,
-    }));
+  const handleQuizFinish = async (data: {
+    quizId?: string | null;
+    answers: { questionId: string; selectedOptionId: string }[];
+    startedAt: string;
+    completedAt: string;
+    timeSpentSeconds: number;
+    concept?: string;
+  }) => {
+    if (!data.quizId) return;
 
     try {
-      await fetch("/api/quiz/attempt", {
+      const res = await fetch("/api/quiz/attempt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          quizId: data.quizId,
           bookId: activeBook?.id,
-          score,
-          totalQuestions: total,
-          concept: concept || "Core Concept",
+          answers: data.answers,
+          startedAt: data.startedAt,
+          completedAt: data.completedAt,
+          timeSpentSeconds: data.timeSpentSeconds,
+          concept: data.concept || "Core Concept",
           pageNumber: activePageNumber,
           chapterTitle: activeBook?.title || "Textbook Chapter",
         }),
       });
-      fetchUserProgress();
+      const result = await res.json();
+      if (res.ok && result.success) {
+        setStudentProgress((prev) => ({
+          ...prev,
+          quizzesCompleted: prev.quizzesCompleted + 1,
+        }));
+        fetchUserProgress();
+      }
     } catch (err) {
       console.warn("Failed to persist quiz attempt:", err);
     }
@@ -393,6 +449,7 @@ export default function Home() {
               <div className="flex items-center gap-3 pt-2">
                 <button 
                   onClick={() => setIsUploadModalOpen(true)}
+                  data-testid="empty-import-btn"
                   className="bg-indigo-600 text-white px-5 py-2.5 rounded-lg hover:bg-indigo-500 transition-colors shadow-sm font-semibold text-xs flex items-center gap-2"
                 >
                   <Upload className="w-4 h-4" />
@@ -400,6 +457,7 @@ export default function Home() {
                 </button>
                 <button
                   onClick={() => setIsLibraryModalOpen(true)}
+                  data-testid="empty-library-btn"
                   className="bg-[#0f1624] text-slate-200 border border-slate-800 px-5 py-2.5 rounded-lg hover:bg-slate-800 transition-colors font-medium text-xs flex items-center gap-2"
                 >
                   <BookOpen className="w-4 h-4 text-indigo-400" />
@@ -467,6 +525,7 @@ export default function Home() {
       <QuizModal
         isOpen={isQuizModalOpen}
         onClose={() => setIsQuizModalOpen(false)}
+        quizId={activeQuizId}
         questions={quizQuestions}
         bookTitle={activeBook?.title || "Unknown"}
         pageNumber={activePageNumber}

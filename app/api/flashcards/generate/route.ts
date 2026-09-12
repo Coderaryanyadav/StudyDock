@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { pageNumber, concept, contextText, bookId } = body;
 
-    // Strict Authentication & Book Ownership Verification
+    // 1. Strict Authentication & Book Ownership Verification
     const auth = await authenticateRequest(req);
     const userId = auth?.id;
 
@@ -28,86 +28,125 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Authentication required to generate flashcards." }, { status: 401 });
     }
 
-    if (bookId) {
-      const isOwner = await verifyBookOwnership(userId, bookId);
-      if (!isOwner) {
-        return NextResponse.json({ error: "Access denied. You do not own this textbook." }, { status: 403 });
-      }
+    if (!bookId) {
+      return NextResponse.json({ error: "Book ID is required." }, { status: 400 });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey && apiKey !== "your_gemini_api_key_here" && contextText && contextText.length > 50) {
-      try {
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const isOwner = await verifyBookOwnership(userId, bookId);
+    if (!isOwner) {
+      return NextResponse.json({ error: "Access denied. You do not own this textbook." }, { status: 403 });
+    }
 
-        const sanitizedContext = sanitizePromptText(contextText, 4000);
-        const prompt = `You are a learning science expert. Create 4 high-yield active recall flashcards from this verified textbook passage:
+    // 2. Strict Context Validation
+    if (!contextText || typeof contextText !== "string" || contextText.trim().length < 40) {
+      return NextResponse.json(
+        { error: "Textbook page context is required to generate grounded flashcards." },
+        { status: 400 }
+      );
+    }
+
+    // 3. Dynamic Flashcard Generation from actual textbook context with Gemini
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey === "your_gemini_api_key_here") {
+      return NextResponse.json(
+        { error: "Gemini API key is unconfigured in server environment." },
+        { status: 503 }
+      );
+    }
+
+    try {
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({
+        model: "gemini-1.5-flash",
+        generationConfig: {
+          responseMimeType: "application/json",
+          temperature: 0.2,
+        },
+      });
+
+      const sanitizedContext = sanitizePromptText(contextText, 4000);
+      const prompt = `You are a learning science expert. Create 4 high-yield active recall flashcards strictly based on this verified textbook passage:
 Passage: "${sanitizedContext}"
 
-Return a JSON array ONLY with this exact structure:
+Return a JSON array of 4 cards with this exact JSON schema:
 [
   {
-    "id": "fc1",
-    "front": "Front of card (Question / Term / Prompt)",
-    "back": "Back of card (Concise definition / formula / key concept)",
-    "concept": "${sanitizePromptText(concept || "Key Concept", 60)}",
-    "chapter": "Chapter",
-    "pageNumber": ${pageNumber || 1},
-    "difficulty": "medium"
+    "front": "Clear question, prompt, or term testing understanding of the passage",
+    "back": "Concise, precise answer, definition, or key formula derived from the passage",
+    "concept": "${sanitizePromptText(concept || "Key Concept", 60)}"
   }
 ]`;
 
-        const result = await model.generateContent(prompt);
-        const text = result.response.text().trim();
+      const result = await model.generateContent(prompt);
+      const text = result.response.text().trim();
+      let parsed: any[] = [];
+      try {
+        parsed = JSON.parse(text);
+      } catch (parseErr) {
         const jsonMatch = text.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
+          parsed = JSON.parse(jsonMatch[0]);
+        } else {
+          return NextResponse.json(
+            { error: "AI produced a malformed response format. Please retry." },
+            { status: 502 }
+          );
+        }
+      }
 
-          const cardInputs: Partial<Flashcard>[] = parsed.map((item: any) => ({
-            bookId: bookId || "",
-            chapterId: `ch-${pageNumber || 1}`,
-            pageNumber: item.pageNumber || pageNumber || 1,
-            concept: item.concept || concept || "Key Concept",
-            question: item.front || item.question || "Concept Definition",
-            answer: item.back || item.answer || "Detailed explanation",
-            status: "unseen" as const,
-          }));
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        return NextResponse.json(
+          { error: "No valid flashcards generated from context." },
+          { status: 502 }
+        );
+      }
 
-          let savedCards: Flashcard[] = [];
-          if (bookId && cardInputs.length > 0) {
-            savedCards = await saveFlashcards(userId, bookId, cardInputs);
-          }
+      // Format and validate card inputs
+      const cardInputs: Partial<Flashcard>[] = [];
+      for (const item of parsed) {
+        const question = (item.front || item.question || "").trim();
+        const answer = (item.back || item.answer || "").trim();
 
-          const responseCards = savedCards.length > 0 ? savedCards : cardInputs.map((c, i) => ({
-            id: `fc-${Date.now()}-${i}`,
-            bookId: c.bookId || "",
-            chapterId: c.chapterId || `ch-${pageNumber || 1}`,
-            pageNumber: c.pageNumber || pageNumber || 1,
-            concept: c.concept || "Key Concept",
-            question: c.question || "",
-            answer: c.answer || "",
-            status: c.status || "unseen",
-          }));
-
-          return NextResponse.json({
-            success: true,
-            flashcards: responseCards,
-            count: responseCards.length,
-            generatedFrom: "ai_context",
+        if (question && answer) {
+          cardInputs.push({
+            bookId,
+            chapterId: null,
+            pageNumber: Number(pageNumber) || 1,
+            concept: String(item.concept || concept || "Key Concept"),
+            question,
+            answer,
+            status: "unseen",
           });
         }
-      } catch (geminiErr) {
-        console.warn("Flashcard generation error:", geminiErr);
+      }
+
+      if (cardInputs.length === 0) {
         return NextResponse.json(
-          { error: "Failed to generate flashcards from textbook context." },
+          { error: "Failed to parse valid front/back flashcards from AI response." },
+          { status: 502 }
+        );
+      }
+
+      // 4. Persist flashcards to database (Fail-closed: Never return fake success or in-memory fallback)
+      const savedCards = await saveFlashcards(userId, bookId, cardInputs);
+      if (!savedCards || savedCards.length === 0) {
+        return NextResponse.json(
+          { error: "Failed to persist flashcards to database." },
           { status: 500 }
         );
       }
-    } else {
+
+      return NextResponse.json({
+        success: true,
+        flashcards: savedCards,
+        count: savedCards.length,
+        generatedFrom: "ai_context",
+      });
+    } catch (geminiErr: any) {
+      console.warn("Flashcard generation error:", geminiErr?.message || geminiErr);
       return NextResponse.json(
-        { error: "Invalid context or AI configuration missing." },
-        { status: 400 }
+        { error: "Failed to generate flashcards from textbook context." },
+        { status: 500 }
       );
     }
   } catch (error: any) {
@@ -118,3 +157,4 @@ Return a JSON array ONLY with this exact structure:
     );
   }
 }
+

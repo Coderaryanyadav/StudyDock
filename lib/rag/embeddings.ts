@@ -1,5 +1,4 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { isDemoMode } from "../supabase/auth";
 
 /**
  * Generates semantic vector embeddings (768 dimensions) using Google Gemini text-embedding-004
@@ -13,7 +12,7 @@ export async function generateEmbedding(
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey || apiKey.trim() === "" || apiKey === "your_gemini_api_key_here") {
-    if (isDemoMode() || process.env.NODE_ENV === "development") {
+    if (process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test") {
       return generateDeterministicVector(text, 768);
     }
     throw new Error("GEMINI_API_KEY is unconfigured in production environment.");
@@ -33,7 +32,7 @@ export async function generateEmbedding(
       throw new Error(`Unexpected embedding dimension: ${result?.embedding?.values?.length}`);
     } catch (error: any) {
       if (attempt === retries) {
-        if (isDemoMode()) {
+        if (process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test") {
           console.warn(`Embedding failed after ${retries} attempts, fallback to deterministic vector:`, error?.message);
           return generateDeterministicVector(text, 768);
         }

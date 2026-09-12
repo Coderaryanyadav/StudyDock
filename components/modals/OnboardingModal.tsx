@@ -28,7 +28,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+    <div data-testid="onboarding-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
       <div className="w-full max-w-lg bg-[#0d131f] border border-slate-800 rounded-xl p-6 md:p-8 shadow-2xl space-y-6 text-slate-100 relative">
         
         {/* Step indicator */}
@@ -41,6 +41,8 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
           </div>
           <button
             onClick={onClose}
+            aria-label="Close Onboarding"
+            data-testid="onboarding-close-btn"
             className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
           >
             <X className="w-5 h-5" />

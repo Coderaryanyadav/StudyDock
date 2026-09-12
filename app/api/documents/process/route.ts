@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { processPdfDocument } from "@/lib/documents/processor";
 import { checkRateLimit } from "@/lib/security/rate-limit";
-import { authenticateRequest, isDemoMode } from "@/lib/supabase/auth";
+import { authenticateRequest } from "@/lib/supabase/auth";
 
 export const runtime = "nodejs";
 

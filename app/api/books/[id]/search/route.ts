@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -28,7 +28,7 @@ export async function GET(
       return NextResponse.json({ error: "Access denied." }, { status: 403 });
     }
 
-    const supabase = await createServerSupabaseClient() || createAdminClient();
+    const supabase = await createServerSupabaseClient();
     if (!supabase) {
       return NextResponse.json({ error: "Database client unavailable." }, { status: 500 });
     }

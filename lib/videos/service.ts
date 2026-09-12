@@ -1,5 +1,5 @@
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { verifyBookOwnership } from "@/lib/supabase/auth";
 import { VideoLecture, VideoTranscriptSegment } from "@/types";
 import { extractYoutubeId, fetchYoutubeMetadata } from "@/lib/youtube/metadata";
 import { fetchYoutubeTranscript } from "@/lib/youtube/transcript";
@@ -8,8 +8,13 @@ export async function getVideosForBook(
   userId: string,
   bookId: string
 ): Promise<VideoLecture[]> {
-  const supabase = (await createServerSupabaseClient()) || createAdminClient();
-  if (!supabase || !userId || !bookId) return [];
+  if (!userId || !bookId) return [];
+
+  const isOwner = await verifyBookOwnership(userId, bookId);
+  if (!isOwner) return [];
+
+  const supabase = await createServerSupabaseClient();
+  if (!supabase) return [];
 
   const { data: rows, error } = await supabase
     .from("videos")
@@ -33,7 +38,7 @@ export async function getVideosForBook(
     return {
       id: v.id,
       youtubeId: v.youtube_id,
-      title: v.title || "YouTube Lecture",
+      title: v.title || "Metadata unavailable",
       channelName: v.channel_name || null,
       durationSeconds: v.duration_seconds || 0,
       formattedDuration: v.formatted_duration || "00:00",
@@ -42,7 +47,7 @@ export async function getVideosForBook(
         timestampSeconds: t.timestamp_seconds,
         formattedTime: t.formatted_time,
         title: t.title,
-        chapterId: `ch-${t.page_number || 1}`,
+        chapterId: t.chapter_id || null,
         pageNumber: t.page_number || 1,
         summary: t.summary || "",
       })),
@@ -58,15 +63,20 @@ export async function attachVideoToBook(
   urlOrId: string,
   customTitle?: string
 ): Promise<VideoLecture | null> {
-  const supabase = (await createServerSupabaseClient()) || createAdminClient();
-  if (!supabase || !userId || !bookId || !urlOrId) return null;
+  if (!userId || !bookId || !urlOrId) return null;
+
+  const isOwner = await verifyBookOwnership(userId, bookId);
+  if (!isOwner) return null;
+
+  const supabase = await createServerSupabaseClient();
+  if (!supabase) return null;
 
   const youtubeId = extractYoutubeId(urlOrId);
   if (!youtubeId) return null;
 
-  // 1. Fetch real metadata via oEmbed
+  // 1. Fetch real metadata via oEmbed standard
   const metadata = await fetchYoutubeMetadata(youtubeId);
-  const resolvedTitle = customTitle?.trim() || metadata?.title || `YouTube Lecture (${youtubeId})`;
+  const resolvedTitle = customTitle?.trim() || metadata?.title || "Metadata unavailable";
   const resolvedChannel = metadata?.channelName || null;
 
   // 2. Insert into videos table
@@ -130,8 +140,13 @@ export async function detachVideoFromBook(
   videoId: string,
   bookId: string
 ): Promise<boolean> {
-  const supabase = (await createServerSupabaseClient()) || createAdminClient();
-  if (!supabase || !userId || !videoId) return false;
+  if (!userId || !videoId || !bookId) return false;
+
+  const isOwner = await verifyBookOwnership(userId, bookId);
+  if (!isOwner) return false;
+
+  const supabase = await createServerSupabaseClient();
+  if (!supabase) return false;
 
   const { error } = await supabase
     .from("videos")

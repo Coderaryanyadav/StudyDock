@@ -180,7 +180,7 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
         {/* Center: Chapter info & Page Navigator */}
         <div className="flex items-center gap-2 text-xs">
           <button
-            disabled={activePageNumber <= 70}
+            disabled={activePageNumber <= 1}
             onClick={() => onPageChange(activePageNumber - 1)}
             className="p-1 rounded hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent text-slate-300"
             title="Previous Page (Left Arrow)"
@@ -191,11 +191,11 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
           <div className="flex items-center gap-1 font-mono bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
             <span className="text-indigo-400 font-semibold">{activePageNumber}</span>
             <span className="text-slate-600">/</span>
-            <span className="text-slate-400">{book.totalPages}</span>
+            <span className="text-slate-400">{book.totalPages || book.pages.length || 1}</span>
           </div>
 
           <button
-            disabled={activePageNumber >= 76}
+            disabled={activePageNumber >= (book.totalPages || book.pages.length || 1)}
             onClick={() => onPageChange(activePageNumber + 1)}
             className="p-1 rounded hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent text-slate-300"
             title="Next Page (Right Arrow)"

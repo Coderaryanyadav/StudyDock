@@ -50,6 +50,9 @@ CREATE TABLE IF NOT EXISTS books (
     mime_type TEXT DEFAULT 'application/pdf',
     status document_status DEFAULT 'READY',
     status_message TEXT,
+    last_page_read INT DEFAULT 1,
+    youtube_url TEXT,
+    video_title TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );

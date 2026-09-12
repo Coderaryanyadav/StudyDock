@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   BookOpen,
   Clock,
@@ -18,6 +18,7 @@ import {
   TrendingUp,
   Brain,
   Check,
+  Plus,
 } from "lucide-react";
 import { ConceptMastery, StudentProgress, StudyPlanItem } from "@/types";
 
@@ -29,12 +30,42 @@ interface StudyDashboardProps {
 }
 
 export const StudyDashboard: React.FC<StudyDashboardProps> = ({
-  progress,
+  progress: initialProgress,
   onContinueStudying,
   onLaunchQuiz,
   onLaunchFlashcards,
 }) => {
-  const [todayPlan, setTodayPlan] = useState<StudyPlanItem[]>(progress.todayPlan);
+  const [progress, setProgress] = useState<StudentProgress>(initialProgress);
+  const [todayPlan, setTodayPlan] = useState<StudyPlanItem[]>(initialProgress.todayPlan || []);
+  const [userBooks, setUserBooks] = useState<any[]>([]);
+
+  useEffect(() => {
+    // Fetch live progress from database
+    fetch("/api/progress")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.authenticated) {
+          setProgress((prev) => ({
+            ...prev,
+            totalStudyMinutes: data.totalStudyMinutes ?? prev.totalStudyMinutes,
+            streakDays: data.streakDays ?? prev.streakDays,
+            questionsAsked: data.questionsAsked ?? prev.questionsAsked,
+            concepts: data.concepts?.length > 0 ? data.concepts : prev.concepts,
+          }));
+        }
+      })
+      .catch(() => {});
+
+    // Fetch live user books
+    fetch("/api/books")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.books) {
+          setUserBooks(data.books);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const togglePlanItem = (id: string) => {
     setTodayPlan((prev) =>
@@ -44,7 +75,8 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
     );
   };
 
-  const weakConcepts = progress.concepts.filter((c) => c.isWeak || c.masteryPercentage < 60);
+  const weakConcepts = (progress.concepts || []).filter((c) => c.isWeak || c.masteryPercentage < 60);
+  const activeBook = userBooks[0] || null;
 
   return (
     <div className="flex-1 overflow-y-auto bg-slate-950 text-slate-100 p-4 md:p-8 custom-scrollbar">
@@ -57,11 +89,11 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
                 Academic Dashboard
               </span>
               <span className="text-xs text-slate-400 font-mono">
-                Active: {progress.activeSubject}
+                Active: {activeBook ? activeBook.subject : progress.activeSubject}
               </span>
             </div>
             <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">
-              Welcome back, Student
+              Welcome back, Scholar
             </h1>
             <p className="text-sm text-slate-400 mt-1">
               You are currently on a <strong className="text-amber-400 font-semibold">{progress.streakDays}-day study streak</strong>. Keep up the momentum!
@@ -70,11 +102,11 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
 
           <div className="flex items-center gap-3">
             <button
-              onClick={() => onContinueStudying(72)}
+              onClick={() => onContinueStudying(activeBook ? activeBook.lastPageRead : 72)}
               className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2"
             >
               <BookOpen className="w-4 h-4" />
-              <span>Continue Studying (p.72)</span>
+              <span>Continue Studying (p.{activeBook ? activeBook.lastPageRead : 72})</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
@@ -92,15 +124,15 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
                   Concept Mastery Review Recommended
                 </h4>
                 <p className="text-xs text-amber-300/80 mt-0.5">
-                  Your quiz accuracy in <strong>Subnetting & CIDR Calculations</strong> is currently at <strong>40%</strong>. Reviewing Section 3.7 will reinforce your understanding.
+                  Your quiz accuracy in <strong>{weakConcepts[0].name}</strong> is currently at <strong>{weakConcepts[0].masteryPercentage}%</strong>. Reviewing {weakConcepts[0].recommendedChapter} will reinforce your understanding.
                 </p>
               </div>
             </div>
             <button
-              onClick={() => onContinueStudying(76)}
+              onClick={() => onContinueStudying(weakConcepts[0].recommendedPage)}
               className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs transition-colors shrink-0 flex items-center gap-1.5"
             >
-              <span>Review Subnetting (p.76)</span>
+              <span>Review {weakConcepts[0].name} (p.{weakConcepts[0].recommendedPage})</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -167,49 +199,58 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
                 <h3 className="font-bold text-base text-white">Active Textbook Module</h3>
               </div>
               <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
-                72% Completed
+                {activeBook ? `Page ${activeBook.lastPageRead || 1} / ${activeBook.totalPages}` : "72% Completed"}
               </span>
             </div>
 
             <div className="flex flex-col sm:flex-row gap-5 items-start">
               <div className="w-full sm:w-44 h-32 rounded-xl bg-gradient-to-br from-indigo-900 via-slate-900 to-purple-950 border border-slate-700 flex flex-col justify-end p-3 relative overflow-hidden shadow-inner">
                 <div className="absolute top-2 right-2 text-[10px] font-mono text-indigo-300/80 bg-indigo-950/60 px-1.5 py-0.5 rounded border border-indigo-800/60">
-                  8th Ed.
+                  {activeBook ? activeBook.edition || "PDF" : "8th Ed."}
                 </div>
-                <div className="text-xs font-bold text-white leading-tight">
-                  Computer Networking: Principles & Protocols
+                <div className="text-xs font-bold text-white leading-tight line-clamp-2">
+                  {activeBook ? activeBook.title : "Computer Networking: Principles & Protocols"}
                 </div>
-                <div className="text-[10px] text-slate-400 mt-1">Kurose & Ross</div>
+                <div className="text-[10px] text-slate-400 mt-1">
+                  {activeBook ? activeBook.author || "Imported Textbook" : "Kurose & Ross"}
+                </div>
               </div>
 
               <div className="flex-1 space-y-3">
                 <div>
                   <h4 className="font-semibold text-sm text-slate-100">
-                    Chapter 3: Transport Layer
+                    {activeBook ? activeBook.title : "Chapter 3: Transport Layer"}
                   </h4>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Currently on Section 3.3 (TCP Three-Way Handshake & Connection Management, Page 72)
+                    Currently on Page {activeBook ? activeBook.lastPageRead : 72}
                   </p>
                 </div>
 
                 {/* Progress bar */}
                 <div className="space-y-1">
                   <div className="flex items-center justify-between text-xs font-mono text-slate-400">
-                    <span>Progress in Chapter 3</span>
-                    <span className="text-indigo-400 font-semibold">5 / 7 sections</span>
+                    <span>Reading Progress</span>
+                    <span className="text-indigo-400 font-semibold">
+                      {activeBook ? `${activeBook.lastPageRead} / ${activeBook.totalPages} pages` : "5 / 7 sections"}
+                    </span>
                   </div>
                   <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full w-[72%]" />
+                    <div
+                      style={{
+                        width: activeBook ? `${Math.min(100, Math.round((activeBook.lastPageRead / activeBook.totalPages) * 100))}%` : "72%",
+                      }}
+                      className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-500"
+                    />
                   </div>
                 </div>
 
                 {/* Quick actions */}
                 <div className="flex flex-wrap items-center gap-2 pt-2">
                   <button
-                    onClick={() => onContinueStudying(72)}
-                    className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs transition-colors flex items-center gap-1.5"
+                    onClick={() => onContinueStudying(activeBook ? activeBook.lastPageRead : 72)}
+                    className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs transition-colors flex items-center gap-1.5 shadow-md"
                   >
-                    <span>Resume Reading (p.72)</span>
+                    <span>Resume Reading (p.{activeBook ? activeBook.lastPageRead : 72})</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
 
@@ -300,7 +341,7 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {progress.concepts.map((concept) => (
+            {(progress.concepts || []).map((concept) => (
               <div
                 key={concept.id}
                 className="p-4 rounded-xl bg-slate-950 border border-slate-800/80 space-y-2.5"

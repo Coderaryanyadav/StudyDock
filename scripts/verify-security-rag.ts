@@ -1,5 +1,5 @@
 /**
- * StudyDock Security, RAG & Data Integrity Verification Suite
+ * StudyDock Security, RAG & Real Product Verification Suite
  */
 
 import { sanitizePromptText, wrapUntrustedDocumentContext, wrapSelectedText, wrapUserQuery } from "../lib/security/prompt-guard";
@@ -8,7 +8,7 @@ import { generateBatchEmbeddings, generateDeterministicVector, cosineSimilarity 
 
 async function runTests() {
   console.log("=================================================");
-  console.log("  STUDYDOCK PRODUCTION REMEDIATION TEST SUITE");
+  console.log("  STUDYDOCK REAL PRODUCT REMEDIATION TEST SUITE");
   console.log("=================================================\n");
 
   let passed = 0;
@@ -85,6 +85,27 @@ async function runTests() {
   const simDifferent = cosineSimilarity(vecA, vecC);
   assert(Math.abs(simIdentical - 1.0) < 0.0001, "Identical query vectors yield similarity 1.0");
   assert(simIdentical > simDifferent, "Semantic similarity ranks matching queries higher than unrelated queries");
+
+  // TEST 5: YouTube Video URL Parsing
+  console.log("\n--- TEST GROUP 4: YouTube Lecture Attachment ---");
+  const parseYouTubeId = (url: string): string | null => {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    const match = url.match(regExp);
+    return match && match[2].length === 11 ? match[2] : null;
+  };
+
+  assert(
+    parseYouTubeId("https://www.youtube.com/watch?v=F27PLhn3W04") === "F27PLhn3W04",
+    "Parses standard YouTube watch URL"
+  );
+  assert(
+    parseYouTubeId("https://youtu.be/F27PLhn3W04?t=120") === "F27PLhn3W04",
+    "Parses shortened youtu.be URL with timestamp"
+  );
+  assert(
+    parseYouTubeId("https://invalid-url.com/not-youtube") === null,
+    "Rejects invalid non-YouTube URLs"
+  );
 
   console.log("\n=================================================");
   console.log(`  TEST RESULTS: ${passed} / ${total} PASSED`);

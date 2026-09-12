@@ -14,16 +14,19 @@ import { DocumentUploadModal } from "@/components/modals/DocumentUploadModal";
 import { OnboardingModal } from "@/components/modals/OnboardingModal";
 import { CommandPaletteModal } from "@/components/modals/CommandPaletteModal";
 import { AuthModal } from "@/components/auth/AuthModal";
+import { LibraryModal } from "@/components/library/LibraryModal";
 import { safeLocalStorageGet, safeLocalStorageSet } from "@/lib/utils";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export default function Home() {
   const [currentView, setCurrentView] = useState<"workspace" | "dashboard" | "landing">("workspace");
   const [activeBook, setActiveBook] = useState<Book>(DEMO_BOOK);
-  const [activePageNumber, setActivePageNumber] = useState<number>(72); // Default to TCP Handshake Page 72
+  const [activePageNumber, setActivePageNumber] = useState<number>(72);
   const [activeVideo, setActiveVideo] = useState<VideoLecture>(DEMO_VIDEO);
   const [studentProgress, setStudentProgress] = useState<StudentProgress>(DEMO_PROGRESS);
 
   // Modals state
+  const [isLibraryModalOpen, setIsLibraryModalOpen] = useState<boolean>(false);
   const [isQuizModalOpen, setIsQuizModalOpen] = useState<boolean>(false);
   const [isFlashcardsModalOpen, setIsFlashcardsModalOpen] = useState<boolean>(false);
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState<boolean>(false);
@@ -35,6 +38,80 @@ export default function Home() {
   // Target citation page jump tracker
   const [targetCitationPage, setTargetCitationPage] = useState<number | null>(null);
 
+  // Load user books on auth
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+    if (supabase) {
+      supabase.auth.getSession().then(({ data }) => {
+        if (data.session?.user) {
+          fetchUserBooksAndLoadLatest();
+        }
+      });
+
+      const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
+        if (session?.user) {
+          fetchUserBooksAndLoadLatest();
+        }
+      });
+
+      return () => {
+        authListener.subscription.unsubscribe();
+      };
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const fetchUserBooksAndLoadLatest = async () => {
+    try {
+      const res = await fetch("/api/books");
+      const data = await res.json();
+      if (res.ok && data.success && data.books?.length > 0) {
+        const latestBook = data.books[0];
+        handleSelectBook(latestBook.id);
+      }
+    } catch (err) {
+      console.warn("Auto-load book note:", err);
+    }
+  };
+
+  const handleSelectBook = async (bookId: string) => {
+    if (!bookId) return;
+    if (bookId.startsWith("demo-") || bookId === DEMO_BOOK.id) {
+      setActiveBook(DEMO_BOOK);
+      setActivePageNumber(72);
+      setActiveVideo(DEMO_VIDEO);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/books/${bookId}`);
+      const data = await res.json();
+      if (res.ok && data.success && data.book) {
+        setActiveBook(data.book);
+        setActivePageNumber(data.lastPageRead || 1);
+        if (data.youtubeUrl) {
+          const match = data.youtubeUrl.match(
+            /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/
+          );
+          const youtubeId = match ? match[1] : "7_LPdttKXPc";
+          setActiveVideo({
+            id: `vid-${youtubeId}`,
+            youtubeId,
+            title: data.videoTitle || `Lecture for ${data.book.title}`,
+            channelName: "Connected Lecture",
+            durationSeconds: 3600,
+            formattedDuration: "60:00",
+            bookId: data.book.id,
+            topics: [],
+          });
+        }
+        setCurrentView("workspace");
+      }
+    } catch (err) {
+      console.error("Failed to load book:", err);
+    }
+  };
+
   // Check first time user for onboarding
   useEffect(() => {
     const hasSeenOnboarding = safeLocalStorageGet("has_seen_onboarding", false);
@@ -44,10 +121,23 @@ export default function Home() {
     }
   }, []);
 
+  // Persist reading position to database when page changes
+  useEffect(() => {
+    if (activeBook.id && !activeBook.id.startsWith("demo-")) {
+      const timeout = setTimeout(() => {
+        fetch(`/api/books/${activeBook.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lastPageRead: activePageNumber }),
+        }).catch(() => {});
+      }, 1000);
+      return () => clearTimeout(timeout);
+    }
+  }, [activeBook.id, activePageNumber]);
+
   // Global Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if user is currently typing in an input or textarea
       if (
         document.activeElement?.tagName === "INPUT" ||
         document.activeElement?.tagName === "TEXTAREA"
@@ -55,7 +145,6 @@ export default function Home() {
         return;
       }
 
-      // Arrow navigation
       if (e.key === "ArrowLeft") {
         setActivePageNumber((prev) => Math.max(1, prev - 1));
       } else if (e.key === "ArrowRight") {
@@ -93,6 +182,8 @@ export default function Home() {
       setIsQuizModalOpen(true);
     } else if (action === "flashcards") {
       setIsFlashcardsModalOpen(true);
+    } else if (action === "library") {
+      setIsLibraryModalOpen(true);
     }
   };
 
@@ -104,6 +195,7 @@ export default function Home() {
         onViewChange={setCurrentView}
         activeBook={activeBook}
         activePageNumber={activePageNumber}
+        onOpenLibraryModal={() => setIsLibraryModalOpen(true)}
         onOpenUploadModal={() => setIsUploadModalOpen(true)}
         onOpenShortcutsModal={() => setIsShortcutsModalOpen(true)}
         onOpenQuizModal={() => setIsQuizModalOpen(true)}
@@ -166,10 +258,22 @@ export default function Home() {
         onSelectAction={handleCommandPaletteAction}
       />
 
+      {/* My Academic Library Modal */}
+      <LibraryModal
+        isOpen={isLibraryModalOpen}
+        onClose={() => setIsLibraryModalOpen(false)}
+        activeBookId={activeBook.id}
+        onSelectBook={handleSelectBook}
+        onOpenUploadModal={() => setIsUploadModalOpen(true)}
+      />
+
       {/* Interactive Modals */}
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
+        onAuthSuccess={() => {
+          fetchUserBooksAndLoadLatest();
+        }}
       />
 
       <QuizModal

@@ -23,6 +23,7 @@ interface WorkspaceNavbarProps {
   onViewChange: (view: "workspace" | "dashboard" | "landing") => void;
   activeBook: Book;
   activePageNumber: number;
+  onOpenLibraryModal: () => void;
   onOpenUploadModal: () => void;
   onOpenShortcutsModal: () => void;
   onOpenQuizModal: () => void;
@@ -37,6 +38,7 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
   onViewChange,
   activeBook,
   activePageNumber,
+  onOpenLibraryModal,
   onOpenUploadModal,
   onOpenShortcutsModal,
   onOpenQuizModal,
@@ -168,12 +170,21 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
         </button>
 
         <button
-          onClick={onOpenUploadModal}
+          onClick={onOpenLibraryModal}
           className="p-1.5 md:px-2.5 md:py-1 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white text-xs font-medium transition-colors border border-slate-700/60 flex items-center gap-1.5"
+          title="My Academic Library"
+        >
+          <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
+          <span className="hidden md:inline">My Library</span>
+        </button>
+
+        <button
+          onClick={onOpenUploadModal}
+          className="p-1.5 md:px-2.5 md:py-1 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors flex items-center gap-1.5 shadow-sm"
           title="Upload PDF Textbook"
         >
-          <Upload className="w-3.5 h-3.5 text-indigo-400" />
-          <span className="hidden md:inline">Upload PDF</span>
+          <Upload className="w-3.5 h-3.5" />
+          <span className="hidden md:inline">Import Book</span>
         </button>
 
         <button

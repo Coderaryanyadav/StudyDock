@@ -310,11 +310,29 @@ export default function Home() {
     setCurrentView("workspace");
   };
 
-  const handleQuizFinish = (score: number, total: number) => {
+  const handleQuizFinish = async (score: number, total: number, concept?: string) => {
     setStudentProgress((prev) => ({
       ...prev,
       quizzesCompleted: prev.quizzesCompleted + 1,
     }));
+
+    try {
+      await fetch("/api/quiz/attempt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookId: activeBook?.id,
+          score,
+          totalQuestions: total,
+          concept: concept || "Core Concept",
+          pageNumber: activePageNumber,
+          chapterTitle: activeBook?.title || "Textbook Chapter",
+        }),
+      });
+      fetchUserProgress();
+    } catch (err) {
+      console.warn("Failed to persist quiz attempt:", err);
+    }
   };
 
   const handleCommandPaletteAction = (action: string) => {

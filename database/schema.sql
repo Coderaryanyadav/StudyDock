@@ -189,6 +189,8 @@ CREATE TABLE IF NOT EXISTS highlights (
     text TEXT NOT NULL,
     color TEXT DEFAULT 'yellow' CHECK (color IN ('yellow', 'blue', 'green', 'pink')),
     note TEXT,
+    bounding_rect JSONB,
+    rects JSONB,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -200,6 +202,17 @@ CREATE TABLE IF NOT EXISTS bookmarks (
     title TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT unique_user_bookmark UNIQUE(user_id, book_id, page_number)
+);
+
+CREATE TABLE IF NOT EXISTS notes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    book_id UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    page_number INT NOT NULL,
+    selected_text TEXT,
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ------------------------------------------------------------------------------
@@ -360,6 +373,10 @@ BEGIN
 END;
 $$;
 
+-- Revoke function execution from public and anon, grant only to authenticated role
+REVOKE EXECUTE ON FUNCTION match_book_chunks(vector, float, int, uuid, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION match_book_chunks(vector, float, int, uuid, uuid) TO authenticated;
+
 -- ==============================================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
 -- ==============================================================================
@@ -377,6 +394,7 @@ ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_citations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE highlights ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bookmarks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE flashcards ENABLE ROW LEVEL SECURITY;
 ALTER TABLE quizzes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE quiz_questions ENABLE ROW LEVEL SECURITY;
@@ -387,18 +405,30 @@ ALTER TABLE student_progress ENABLE ROW LEVEL SECURITY;
 
 -- Profiles: users can read/update their own profile
 CREATE POLICY "Users can access own profile" ON profiles
-    FOR ALL USING (auth.uid() = id);
+    FOR ALL TO authenticated
+    USING (auth.uid() = id)
+    WITH CHECK (auth.uid() = id);
 
--- Books: users only access books they created
+-- Books: users only access and create books they own
 CREATE POLICY "Users can access own books" ON books
-    FOR ALL USING (auth.uid() = user_id);
+    FOR ALL TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
 
 -- Chapters & Sections: accessible if user owns the book
 CREATE POLICY "Users can access chapters of own books" ON chapters
-    FOR ALL USING (EXISTS (SELECT 1 FROM books WHERE books.id = chapters.book_id AND books.user_id = auth.uid()));
+    FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM books WHERE books.id = chapters.book_id AND books.user_id = auth.uid()))
+    WITH CHECK (EXISTS (SELECT 1 FROM books WHERE books.id = chapters.book_id AND books.user_id = auth.uid()));
 
 CREATE POLICY "Users can access sections of own books" ON sections
-    FOR ALL USING (EXISTS (
+    FOR ALL TO authenticated
+    USING (EXISTS (
+        SELECT 1 FROM chapters
+        INNER JOIN books ON books.id = chapters.book_id
+        WHERE chapters.id = sections.chapter_id AND books.user_id = auth.uid()
+    ))
+    WITH CHECK (EXISTS (
         SELECT 1 FROM chapters
         INNER JOIN books ON books.id = chapters.book_id
         WHERE chapters.id = sections.chapter_id AND books.user_id = auth.uid()
@@ -406,27 +436,45 @@ CREATE POLICY "Users can access sections of own books" ON sections
 
 -- Book Pages & Chunks: accessible if user owns the book
 CREATE POLICY "Users can access pages of own books" ON book_pages
-    FOR ALL USING (EXISTS (SELECT 1 FROM books WHERE books.id = book_pages.book_id AND books.user_id = auth.uid()));
+    FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM books WHERE books.id = book_pages.book_id AND books.user_id = auth.uid()))
+    WITH CHECK (EXISTS (SELECT 1 FROM books WHERE books.id = book_pages.book_id AND books.user_id = auth.uid()));
 
 CREATE POLICY "Users can access chunks of own books" ON book_chunks
-    FOR ALL USING (EXISTS (SELECT 1 FROM books WHERE books.id = book_chunks.book_id AND books.user_id = auth.uid()));
+    FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM books WHERE books.id = book_chunks.book_id AND books.user_id = auth.uid()))
+    WITH CHECK (EXISTS (SELECT 1 FROM books WHERE books.id = book_chunks.book_id AND books.user_id = auth.uid()));
 
 -- Videos: accessible if user owns video
 CREATE POLICY "Users can access own videos" ON videos
-    FOR ALL USING (auth.uid() = user_id);
+    FOR ALL TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Users can access topics of own videos" ON video_topics
-    FOR ALL USING (EXISTS (SELECT 1 FROM videos WHERE videos.id = video_topics.video_id AND videos.user_id = auth.uid()));
+    FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM videos WHERE videos.id = video_topics.video_id AND videos.user_id = auth.uid()))
+    WITH CHECK (EXISTS (SELECT 1 FROM videos WHERE videos.id = video_topics.video_id AND videos.user_id = auth.uid()));
 
 -- Conversations & Messages
 CREATE POLICY "Users can access own conversations" ON conversations
-    FOR ALL USING (auth.uid() = user_id);
+    FOR ALL TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Users can access messages of own conversations" ON messages
-    FOR ALL USING (EXISTS (SELECT 1 FROM conversations WHERE conversations.id = messages.conversation_id AND conversations.user_id = auth.uid()));
+    FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM conversations WHERE conversations.id = messages.conversation_id AND conversations.user_id = auth.uid()))
+    WITH CHECK (EXISTS (SELECT 1 FROM conversations WHERE conversations.id = messages.conversation_id AND conversations.user_id = auth.uid()));
 
 CREATE POLICY "Users can access citations of own messages" ON message_citations
-    FOR ALL USING (EXISTS (
+    FOR ALL TO authenticated
+    USING (EXISTS (
+        SELECT 1 FROM messages
+        INNER JOIN conversations ON conversations.id = messages.conversation_id
+        WHERE messages.id = message_citations.message_id AND conversations.user_id = auth.uid()
+    ))
+    WITH CHECK (EXISTS (
         SELECT 1 FROM messages
         INNER JOIN conversations ON conversations.id = messages.conversation_id
         WHERE messages.id = message_citations.message_id AND conversations.user_id = auth.uid()
@@ -434,31 +482,83 @@ CREATE POLICY "Users can access citations of own messages" ON message_citations
 
 -- Annotations: Highlights & Bookmarks
 CREATE POLICY "Users can access own highlights" ON highlights
-    FOR ALL USING (auth.uid() = user_id);
+    FOR ALL TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Users can access own bookmarks" ON bookmarks
-    FOR ALL USING (auth.uid() = user_id);
+    FOR ALL TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can access own notes" ON notes
+    FOR ALL TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
 
 -- Flashcards
 CREATE POLICY "Users can access own flashcards" ON flashcards
-    FOR ALL USING (auth.uid() = user_id);
+    FOR ALL TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
 
 -- Quizzes & Attempts
 CREATE POLICY "Users can access own quizzes" ON quizzes
-    FOR ALL USING (auth.uid() = user_id);
+    FOR ALL TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Users can access questions of own quizzes" ON quiz_questions
-    FOR ALL USING (EXISTS (SELECT 1 FROM quizzes WHERE quizzes.id = quiz_questions.quiz_id AND quizzes.user_id = auth.uid()));
+    FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM quizzes WHERE quizzes.id = quiz_questions.quiz_id AND quizzes.user_id = auth.uid()))
+    WITH CHECK (EXISTS (SELECT 1 FROM quizzes WHERE quizzes.id = quiz_questions.quiz_id AND quizzes.user_id = auth.uid()));
 
 CREATE POLICY "Users can access own quiz attempts" ON quiz_attempts
-    FOR ALL USING (auth.uid() = user_id);
+    FOR ALL TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
 
 -- Concept Mastery & Progress
 CREATE POLICY "Users can access own concept mastery" ON student_concepts
-    FOR ALL USING (auth.uid() = user_id);
+    FOR ALL TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Users can access own study sessions" ON study_sessions
-    FOR ALL USING (auth.uid() = user_id);
+    FOR ALL TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Users can access own progress" ON student_progress
-    FOR ALL USING (auth.uid() = user_id);
+    FOR ALL TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+-- ------------------------------------------------------------------------------
+-- STORAGE BUCKET RLS: textbooks (Private Per-User Storage)
+-- ------------------------------------------------------------------------------
+-- Ensure private isolation inside storage bucket: textbooks/{auth.uid()}/*
+DO $$ BEGIN
+    INSERT INTO storage.buckets (id, name, public) 
+    VALUES ('textbooks', 'textbooks', false)
+    ON CONFLICT (id) DO UPDATE SET public = false;
+EXCEPTION
+    WHEN undefined_table THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE POLICY "Users can upload own textbooks to storage" ON storage.objects
+        FOR INSERT TO authenticated
+        WITH CHECK (bucket_id = 'textbooks' AND (storage.foldername(name))[1] = auth.uid()::text);
+
+    CREATE POLICY "Users can view own textbooks from storage" ON storage.objects
+        FOR SELECT TO authenticated
+        USING (bucket_id = 'textbooks' AND (storage.foldername(name))[1] = auth.uid()::text);
+
+    CREATE POLICY "Users can delete own textbooks from storage" ON storage.objects
+        FOR DELETE TO authenticated
+        USING (bucket_id = 'textbooks' AND (storage.foldername(name))[1] = auth.uid()::text);
+EXCEPTION
+    WHEN undefined_table THEN null;
+    WHEN duplicate_object THEN null;
+END $$;

@@ -46,9 +46,22 @@ export const FlashcardsModal: React.FC<FlashcardsModalProps> = ({
   };
 
   const handleMarkStatus = (status: "learning" | "mastered") => {
+    const cardToUpdate = cards[currentIndex];
     setCards((prev) =>
       prev.map((c, i) => (i === currentIndex ? { ...c, status } : c))
     );
+
+    if (cardToUpdate?.id && !cardToUpdate.id.startsWith("temp-")) {
+      fetch("/api/flashcards/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          flashcardId: cardToUpdate.id,
+          status,
+        }),
+      }).catch((err) => console.warn("Failed to persist flashcard review:", err));
+    }
+
     handleNext();
   };
 

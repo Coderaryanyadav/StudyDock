@@ -42,12 +42,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // MIME type & extension check
-    const allowedMimes = ["application/pdf", "text/plain", "application/octet-stream"];
+    // MIME type & extension check (Strictly PDF only)
     const fileName = file.name.toLowerCase();
-    if (!allowedMimes.includes(file.type) && !fileName.endsWith(".pdf") && !fileName.endsWith(".txt")) {
+    const isPdfMime = file.type === "application/pdf" || file.type === "application/x-pdf";
+    const isPdfExt = fileName.endsWith(".pdf");
+
+    if (!isPdfExt && !isPdfMime) {
       return NextResponse.json(
-        { error: "Unsupported file type. Please upload a valid PDF document." },
+        { error: "Unsupported file type. Please upload a valid PDF document (.pdf)." },
         { status: 400 }
       );
     }
@@ -72,9 +74,9 @@ export async function POST(req: NextRequest) {
       fileSizeBytes: file.size,
       mimeType: file.type || "application/pdf",
       userId,
-      title: title || file.name.replace(/\.[^/.]+$/, ""),
-      author: author || "Academic Author",
-      subject: subject || "General Studies",
+      title: title.trim() || file.name.replace(/\.[^/.]+$/, ""),
+      author: author.trim() || "Unknown Author",
+      subject: subject.trim() || undefined,
     });
 
     return NextResponse.json({

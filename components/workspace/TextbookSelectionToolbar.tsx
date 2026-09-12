@@ -94,6 +94,14 @@ export const TextbookSelectionToolbar: React.FC<TextbookSelectionToolbarProps> =
         <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" />
         <span className="hidden sm:inline">Highlight</span>
       </button>
+
+      <button
+        onClick={() => onAction("note")}
+        className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-indigo-500/20 text-indigo-300 transition-colors"
+        title="Add study note for this selection"
+      >
+        <span className="hidden sm:inline">Note</span>
+      </button>
     </div>
   );
 };

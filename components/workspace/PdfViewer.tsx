@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Loader2, AlertCircle, RefreshCw, ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
+import { Highlight, HighlightRect } from "@/types";
 
 interface PdfViewerProps {
   bookId: string;
@@ -9,6 +10,12 @@ interface PdfViewerProps {
   scale?: number;
   onPageChange: (newPage: number) => void;
   onMouseUp?: (e: React.MouseEvent) => void;
+  onSelectionCoords?: (info: {
+    text: string;
+    boundingRect: HighlightRect;
+    rects: HighlightRect[];
+  }) => void;
+  highlights?: Highlight[];
   totalPages?: number;
 }
 
@@ -18,6 +25,8 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   scale = 1.0,
   onPageChange,
   onMouseUp,
+  onSelectionCoords,
+  highlights = [],
   totalPages = 1,
 }) => {
   const [loading, setLoading] = useState<boolean>(true);
@@ -25,53 +34,58 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [docTotalPages, setDocTotalPages] = useState<number>(totalPages);
   const [renderProgress, setRenderProgress] = useState<boolean>(false);
+  const [pageDimensions, setPageDimensions] = useState<{ width: number; height: number }>({
+    width: 600,
+    height: 800,
+  });
 
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const textLayerRef = useRef<HTMLDivElement | null>(null);
   const renderTaskRef = useRef<any>(null);
   const pdfUrl = `/api/books/${encodeURIComponent(bookId)}/pdf`;
 
   // 1. Initialize and load PDF document with PDF.js
-  useEffect(() => {
+  const loadPdf = useCallback(async () => {
     let isCancelled = false;
     setLoading(true);
     setError(null);
 
-    const loadPdf = async () => {
-      try {
-        const pdfjsLib = await import("pdfjs-dist");
-        if (pdfjsLib.GlobalWorkerOptions) {
-          pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-        }
-
-        const loadingTask = pdfjsLib.getDocument({
-          url: pdfUrl,
-          withCredentials: true,
-          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.296/cmaps/",
-          cMapPacked: true,
-        });
-
-        const loadedDoc = await loadingTask.promise;
-        if (!isCancelled) {
-          setPdfDoc(loadedDoc);
-          setDocTotalPages(loadedDoc.numPages);
-          setLoading(false);
-        }
-      } catch (err: any) {
-        if (!isCancelled) {
-          console.warn("PDF.js direct rendering note (falling back to native stream embed):", err?.message);
-          setError(err?.message || "Failed to render PDF in canvas. Using secure native reader view.");
-          setLoading(false);
-        }
+    try {
+      const pdfjsLib = await import("pdfjs-dist");
+      if (pdfjsLib.GlobalWorkerOptions) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
       }
-    };
 
-    loadPdf();
+      const loadingTask = pdfjsLib.getDocument({
+        url: pdfUrl,
+        withCredentials: true,
+        cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.296/cmaps/",
+        cMapPacked: true,
+      });
+
+      const loadedDoc = await loadingTask.promise;
+      if (!isCancelled) {
+        setPdfDoc(loadedDoc);
+        setDocTotalPages(loadedDoc.numPages);
+        setLoading(false);
+      }
+    } catch (err: any) {
+      if (!isCancelled) {
+        console.warn("PDF.js direct rendering fallback:", err?.message);
+        setError(err?.message || "Failed to render PDF in canvas. Native view active.");
+        setLoading(false);
+      }
+    }
 
     return () => {
       isCancelled = true;
     };
-  }, [bookId, pdfUrl]);
+  }, [pdfUrl]);
+
+  useEffect(() => {
+    loadPdf();
+  }, [loadPdf]);
 
   // 2. Render physical page to canvas and build text selection layer
   const renderPage = useCallback(
@@ -87,7 +101,9 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         const targetPageNum = Math.min(Math.max(1, pageNum), doc.numPages);
         const page = await doc.getPage(targetPageNum);
 
-        const viewport = page.getViewport({ scale: currentScale * 1.5 }); // High DPI rendering
+        // DPR-aware crisp rendering
+        const dpr = window.devicePixelRatio || 1.5;
+        const viewport = page.getViewport({ scale: currentScale * dpr });
         const canvas = canvasRef.current;
         const context = canvas.getContext("2d");
 
@@ -95,8 +111,12 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
         canvas.height = viewport.height;
         canvas.width = viewport.width;
-        canvas.style.width = `${viewport.width / 1.5}px`;
-        canvas.style.height = `${viewport.height / 1.5}px`;
+        const cssWidth = viewport.width / dpr;
+        const cssHeight = viewport.height / dpr;
+        canvas.style.width = `${cssWidth}px`;
+        canvas.style.height = `${cssHeight}px`;
+
+        setPageDimensions({ width: cssWidth, height: cssHeight });
 
         const renderContext = {
           canvasContext: context,
@@ -108,14 +128,13 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
         await renderTask.promise;
 
-        // Render text overlay layer for mouse selection & toolbar
+        // Render text overlay layer for mouse selection & highlights
         if (textLayerRef.current) {
           textLayerRef.current.innerHTML = "";
-          textLayerRef.current.style.width = `${viewport.width / 1.5}px`;
-          textLayerRef.current.style.height = `${viewport.height / 1.5}px`;
+          textLayerRef.current.style.width = `${cssWidth}px`;
+          textLayerRef.current.style.height = `${cssHeight}px`;
 
           const textContent = await page.getTextContent();
-          const pdfjsLib = await import("pdfjs-dist");
 
           if (textContent && textContent.items) {
             for (const item of textContent.items as any[]) {
@@ -127,13 +146,12 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
               textSpan.style.cursor = "text";
               textSpan.style.whiteSpace = "pre";
 
-              // Scale transform items to text layer coordinates
               const tx = item.transform;
               if (tx && tx.length >= 6) {
                 const fontSize = Math.sqrt(tx[0] * tx[0] + tx[1] * tx[1]) * currentScale;
                 textSpan.style.fontSize = `${fontSize}px`;
-                textSpan.style.left = `${(tx[4] * currentScale * 1.5) / 1.5}px`;
-                textSpan.style.top = `${(viewport.height - (tx[5] * currentScale * 1.5) - (fontSize * 1.5)) / 1.5}px`;
+                textSpan.style.left = `${(tx[4] * currentScale * dpr) / dpr}px`;
+                textSpan.style.top = `${(viewport.height - (tx[5] * currentScale * dpr) - (fontSize * dpr)) / dpr}px`;
               }
 
               textLayerRef.current.appendChild(textSpan);
@@ -157,24 +175,71 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     }
   }, [pdfDoc, pageNumber, scale, renderPage]);
 
+  // Handle text selection & calculate normalized coordinates (0..1)
+  const handleContainerMouseUp = (e: React.MouseEvent) => {
+    if (onMouseUp) onMouseUp(e);
+
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !textLayerRef.current) return;
+
+    const text = selection.toString().trim();
+    if (text.length <= 1) return;
+
+    try {
+      const range = selection.getRangeAt(0);
+      const containerRect = textLayerRef.current.getBoundingClientRect();
+      const clientRects = Array.from(range.getClientRects());
+      const bound = range.getBoundingClientRect();
+
+      if (containerRect.width > 0 && containerRect.height > 0) {
+        const normalizedRects: HighlightRect[] = clientRects.map((r) => ({
+          x: Math.max(0, (r.left - containerRect.left) / containerRect.width),
+          y: Math.max(0, (r.top - containerRect.top) / containerRect.height),
+          width: Math.min(1, r.width / containerRect.width),
+          height: Math.min(1, r.height / containerRect.height),
+        }));
+
+        const normalizedBounding: HighlightRect = {
+          x: Math.max(0, (bound.left - containerRect.left) / containerRect.width),
+          y: Math.max(0, (bound.top - containerRect.top) / containerRect.height),
+          width: Math.min(1, bound.width / containerRect.width),
+          height: Math.min(1, bound.height / containerRect.height),
+        };
+
+        if (onSelectionCoords) {
+          onSelectionCoords({
+            text,
+            boundingRect: normalizedBounding,
+            rects: normalizedRects,
+          });
+        }
+      }
+    } catch (err) {
+      // selection error
+    }
+  };
+
+  // Highlights for the active page
+  const pageHighlights = highlights.filter((h) => h.pageNumber === pageNumber);
+
   if (loading) {
     return (
       <div className="w-full h-full min-h-[500px] flex flex-col items-center justify-center gap-3 text-slate-400 bg-slate-950 p-6">
         <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
         <p className="text-xs font-medium tracking-wide text-slate-300">
-          Loading original PDF document...
+          Loading original PDF textbook...
         </p>
       </div>
     );
   }
 
-  // Fallback to high-fidelity native PDF embed if canvas parsing is unsupported in browser environment
+  // Fallback to iframe if canvas rendering is unavailable
   if (error || !pdfDoc) {
     return (
-      <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950 relative">
+      <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950 relative min-h-[500px] p-2">
         <iframe
           src={`${pdfUrl}#page=${pageNumber}&zoom=${Math.round(scale * 100)}`}
-          className="w-full h-full border-none rounded-xl bg-slate-900"
+          className="w-full h-full border-none rounded-xl bg-slate-900 min-h-[600px]"
           title="PDF Viewer"
         />
       </div>
@@ -183,20 +248,71 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
   return (
     <div
-      onMouseUp={onMouseUp}
+      onMouseUp={handleContainerMouseUp}
+      ref={containerRef}
       className="w-full flex justify-center py-4 relative select-text overflow-x-auto custom-scrollbar"
     >
       <div className="relative shadow-2xl rounded-lg overflow-hidden border border-slate-800 bg-white">
         <canvas ref={canvasRef} className="block select-none" />
+
+        {/* Text Layer for mouse selection */}
         <div
           ref={textLayerRef}
-          className="absolute top-0 left-0 textLayer pointer-events-auto select-text"
+          className="absolute top-0 left-0 textLayer pointer-events-auto select-text z-10"
           style={{
             transformOrigin: "0 0",
             userSelect: "text",
             WebkitUserSelect: "text",
           }}
         />
+
+        {/* Persistent Highlights Overlay Layer */}
+        <div
+          className="absolute inset-0 pointer-events-none z-10 overflow-hidden"
+          style={{ width: `${pageDimensions.width}px`, height: `${pageDimensions.height}px` }}
+        >
+          {pageHighlights.map((hl) => {
+            const colorMap = {
+              yellow: "bg-yellow-400/35 border-b-2 border-yellow-400/80",
+              blue: "bg-cyan-400/35 border-b-2 border-cyan-400/80",
+              green: "bg-emerald-400/35 border-b-2 border-emerald-400/80",
+              pink: "bg-pink-400/35 border-b-2 border-pink-400/80",
+            };
+            const colorClass = colorMap[hl.color] || colorMap.yellow;
+
+            if (hl.rects && hl.rects.length > 0) {
+              return hl.rects.map((r, idx) => (
+                <div
+                  key={`${hl.id}-${idx}`}
+                  className={`absolute rounded-sm ${colorClass}`}
+                  style={{
+                    left: `${r.x * 100}%`,
+                    top: `${r.y * 100}%`,
+                    width: `${r.width * 100}%`,
+                    height: `${r.height * 100}%`,
+                  }}
+                />
+              ));
+            }
+
+            if (hl.boundingRect) {
+              return (
+                <div
+                  key={hl.id}
+                  className={`absolute rounded-sm ${colorClass}`}
+                  style={{
+                    left: `${hl.boundingRect.x * 100}%`,
+                    top: `${hl.boundingRect.y * 100}%`,
+                    width: `${hl.boundingRect.width * 100}%`,
+                    height: `${hl.boundingRect.height * 100}%`,
+                  }}
+                />
+              );
+            }
+
+            return null;
+          })}
+        </div>
       </div>
     </div>
   );

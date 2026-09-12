@@ -22,6 +22,10 @@ export function isDemoMode(): boolean {
  * Strictly returns null for unauthenticated users in production.
  */
 export async function authenticateRequest(req?: NextRequest): Promise<AuthSessionUser | null> {
+  return getAuthenticatedUser(req);
+}
+
+export async function getAuthenticatedUser(req?: NextRequest): Promise<AuthSessionUser | null> {
   const supabase = await createServerSupabaseClient();
 
   if (!supabase) {

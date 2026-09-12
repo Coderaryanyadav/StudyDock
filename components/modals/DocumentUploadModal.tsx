@@ -50,17 +50,8 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
       const formData = new FormData();
       formData.append("file", file);
       formData.append("title", title || file.name);
-      formData.append("author", author || "Academic Author");
-      formData.append("subject", subject);
-
-      // Transition step indicators
-      setTimeout(() => {
-        setProcessStep("extracting");
-      }, 500);
-
-      setTimeout(() => {
-        setProcessStep("indexing");
-      }, 1200);
+      formData.append("author", author || "Unknown Author");
+      formData.append("subject", subject || "General");
 
       const res = await fetch("/api/documents/process", {
         method: "POST",
@@ -73,10 +64,8 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
       }
 
       setProcessStep("ready");
-      setTimeout(() => {
-        onDocumentUploaded(data.book);
-        onClose();
-      }, 700);
+      onDocumentUploaded(data.book);
+      onClose();
     } catch (err: any) {
       setError(err?.message || "Failed to process and index document.");
       setProcessStep("idle");
@@ -111,7 +100,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
           <div className="border-2 border-dashed border-slate-700 hover:border-indigo-500 rounded-2xl p-6 text-center cursor-pointer transition-colors bg-slate-950/60 relative">
             <input
               type="file"
-              accept=".pdf,.txt,.md"
+              accept=".pdf,application/pdf"
               onChange={handleFileChange}
               disabled={isUploading}
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
@@ -122,7 +111,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
                 {file ? file.name : "Choose a PDF or drag & drop"}
               </div>
               <p className="text-[11px] text-slate-500">
-                Supported formats: PDF, Text (Max 50MB)
+                Supported formats: PDF (Max 50MB)
               </p>
             </div>
           </div>

@@ -3,6 +3,8 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { checkRateLimit } from "@/lib/security/rate-limit";
 import { sanitizePromptText } from "@/lib/security/prompt-guard";
 import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
+import { saveQuizWithQuestions } from "@/lib/quizzes/service";
+import { QuizQuestion } from "@/types";
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,15 +20,18 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { pageNumber, concept, contextText, bookId } = body;
 
-    // Verify ownership if custom bookId is specified
+    // Strict Authentication & Book Ownership Verification
+    const auth = await authenticateRequest(req);
+    const userId = auth?.id;
+
+    if (!userId) {
+      return NextResponse.json({ error: "Authentication required to generate quizzes." }, { status: 401 });
+    }
+
     if (bookId && !bookId.startsWith("demo-")) {
-      const auth = await authenticateRequest(req);
-      if (!auth?.id) {
-        return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-      }
-      const isOwner = await verifyBookOwnership(auth.id, bookId);
+      const isOwner = await verifyBookOwnership(userId, bookId);
       if (!isOwner) {
-        return NextResponse.json({ error: "Access denied." }, { status: 403 });
+        return NextResponse.json({ error: "Access denied. You do not own this textbook." }, { status: 403 });
       }
     }
 
@@ -59,10 +64,54 @@ Return a JSON array ONLY with this exact structure:
         const jsonMatch = text.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);
+          
+          const formattedQuestions: QuizQuestion[] = parsed.map((item: any, idx: number) => {
+            const rawOptions = Array.isArray(item.options) ? item.options : [];
+            const correctIdx = typeof item.correctIndex === "number" ? item.correctIndex : 0;
+            const options = rawOptions.map((opt: any, optIdx: number) => {
+              if (typeof opt === "object" && opt !== null && "text" in opt) {
+                return {
+                  id: opt.id || `opt-${optIdx}`,
+                  text: String(opt.text),
+                  isCorrect: Boolean(opt.isCorrect ?? (optIdx === correctIdx)),
+                };
+              }
+              return {
+                id: `opt-${optIdx}`,
+                text: String(opt),
+                isCorrect: optIdx === correctIdx,
+              };
+            });
+
+            return {
+              id: item.id || `q-${Date.now()}-${idx}`,
+              bookId: bookId || "",
+              chapterId: `ch-${pageNumber || 1}`,
+              pageNumber: item.pageNumber || pageNumber || 1,
+              concept: item.concept || concept || "Core Concept",
+              question: item.question,
+              options,
+              explanation: item.explanation || "",
+              difficulty: (item.difficulty as "easy" | "medium" | "hard") || "medium",
+            };
+          });
+
+          // Persist quiz to Supabase database
+          let savedQuizId: string | null = null;
+          if (bookId && formattedQuestions.length > 0) {
+            savedQuizId = await saveQuizWithQuestions(
+              userId,
+              bookId,
+              `${concept || "Textbook"} Assessment`,
+              formattedQuestions
+            );
+          }
+
           return NextResponse.json({
             success: true,
-            questions: parsed,
-            count: parsed.length,
+            quizId: savedQuizId,
+            questions: formattedQuestions,
+            count: formattedQuestions.length,
             generatedFrom: "ai_context",
           });
         }

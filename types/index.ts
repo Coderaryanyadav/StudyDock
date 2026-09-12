@@ -71,6 +71,13 @@ export interface Book {
   chunks: BookChunk[];
 }
 
+export interface HighlightRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface Highlight {
   id: string;
   bookId: string;
@@ -79,6 +86,8 @@ export interface Highlight {
   color: "yellow" | "blue" | "green" | "pink";
   createdAt: string;
   note?: string;
+  boundingRect?: HighlightRect | null;
+  rects?: HighlightRect[];
 }
 
 export interface Bookmark {
@@ -87,6 +96,16 @@ export interface Bookmark {
   pageNumber: number;
   title: string;
   createdAt: string;
+}
+
+export interface Note {
+  id: string;
+  bookId: string;
+  pageNumber: number;
+  selectedText?: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface VideoTopic {

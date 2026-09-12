@@ -11,7 +11,7 @@ interface QuizModalProps {
   bookTitle?: string;
   chapterTitle?: string;
   pageNumber?: number;
-  onFinishQuiz?: (score: number, total: number) => void;
+  onFinishQuiz?: (score: number, total: number, concept?: string) => void;
 }
 
 export const QuizModal: React.FC<QuizModalProps> = ({
@@ -75,7 +75,8 @@ export const QuizModal: React.FC<QuizModalProps> = ({
         triggerConfetti();
       }
       if (onFinishQuiz) {
-        onFinishQuiz(score, questions.length);
+        const primaryConcept = questions[0]?.concept || "Core Concept";
+        onFinishQuiz(score, questions.length, primaryConcept);
       }
     }
   };

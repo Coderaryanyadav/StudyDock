@@ -3,6 +3,8 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { checkRateLimit } from "@/lib/security/rate-limit";
 import { sanitizePromptText } from "@/lib/security/prompt-guard";
 import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
+import { saveFlashcards } from "@/lib/flashcards/service";
+import { Flashcard } from "@/types";
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,15 +20,18 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { pageNumber, concept, contextText, bookId } = body;
 
-    // Verify ownership if custom bookId is specified
+    // Strict Authentication & Book Ownership Verification
+    const auth = await authenticateRequest(req);
+    const userId = auth?.id;
+
+    if (!userId) {
+      return NextResponse.json({ error: "Authentication required to generate flashcards." }, { status: 401 });
+    }
+
     if (bookId && !bookId.startsWith("demo-")) {
-      const auth = await authenticateRequest(req);
-      if (!auth?.id) {
-        return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-      }
-      const isOwner = await verifyBookOwnership(auth.id, bookId);
+      const isOwner = await verifyBookOwnership(userId, bookId);
       if (!isOwner) {
-        return NextResponse.json({ error: "Access denied." }, { status: 403 });
+        return NextResponse.json({ error: "Access denied. You do not own this textbook." }, { status: 403 });
       }
     }
 
@@ -58,10 +63,37 @@ Return a JSON array ONLY with this exact structure:
         const jsonMatch = text.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);
+
+          const cardInputs: Partial<Flashcard>[] = parsed.map((item: any) => ({
+            bookId: bookId || "",
+            chapterId: `ch-${pageNumber || 1}`,
+            pageNumber: item.pageNumber || pageNumber || 1,
+            concept: item.concept || concept || "Key Concept",
+            question: item.front || item.question || "Concept Definition",
+            answer: item.back || item.answer || "Detailed explanation",
+            status: "unseen" as const,
+          }));
+
+          let savedCards: Flashcard[] = [];
+          if (bookId && cardInputs.length > 0) {
+            savedCards = await saveFlashcards(userId, bookId, cardInputs);
+          }
+
+          const responseCards = savedCards.length > 0 ? savedCards : cardInputs.map((c, i) => ({
+            id: `fc-${Date.now()}-${i}`,
+            bookId: c.bookId || "",
+            chapterId: c.chapterId || `ch-${pageNumber || 1}`,
+            pageNumber: c.pageNumber || pageNumber || 1,
+            concept: c.concept || "Key Concept",
+            question: c.question || "",
+            answer: c.answer || "",
+            status: c.status || "unseen",
+          }));
+
           return NextResponse.json({
             success: true,
-            flashcards: parsed,
-            count: parsed.length,
+            flashcards: responseCards,
+            count: responseCards.length,
             generatedFrom: "ai_context",
           });
         }

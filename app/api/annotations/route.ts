@@ -14,6 +14,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: true, highlights: [], bookmarks: [] });
     }
 
+    if (!bookId.startsWith("demo-")) {
+      const isOwner = await verifyBookOwnership(userId, bookId);
+      if (!isOwner) {
+        return NextResponse.json({ error: "Access denied." }, { status: 403 });
+      }
+    }
+
     const supabase = (await createServerSupabaseClient()) || createAdminClient();
     if (!supabase) {
       return NextResponse.json({ success: true, highlights: [], bookmarks: [] });
@@ -42,6 +49,8 @@ export async function GET(req: NextRequest) {
         text: h.text,
         color: h.color || "yellow",
         note: h.note,
+        boundingRect: h.bounding_rect || undefined,
+        rects: h.rects || undefined,
         createdAt: h.created_at,
       })),
       bookmarks: (bookmarks || []).map((b) => ({
@@ -66,7 +75,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { type, bookId, pageNumber, text, color, note, title } = body;
+    const { type, bookId, pageNumber, text, color, note, title, boundingRect, rects } = body;
 
     if (!bookId) {
       return NextResponse.json({ error: "Book ID is required." }, { status: 400 });
@@ -112,6 +121,8 @@ export async function POST(req: NextRequest) {
         text: text.slice(0, 2000),
         color: color || "yellow",
         note: note ? note.slice(0, 2000) : null,
+        bounding_rect: boundingRect || null,
+        rects: rects || null,
       })
       .select("id")
       .single();

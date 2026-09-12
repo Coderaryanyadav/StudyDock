@@ -101,8 +101,8 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
     mimeType,
     userId,
     title,
-    author = "Academic Publication",
-    subject = "General Studies",
+    author = "Unknown Author",
+    subject = "General",
   } = options;
 
   if (!userId || userId === "guest-user") {
@@ -115,34 +115,22 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
     throw new Error("Invalid document format: Missing valid PDF header signature (%PDF-).");
   }
 
-  // 2. Extract text and pages with pdf-parse using page-level hooks
+  // 2. Extract text and pages with PDFParse
   const pageTexts: { pageNum: number; text: string }[] = [];
   let detectedTotalPages = 1;
 
   try {
-    const pdfParse = require("pdf-parse");
-    let pageCounter = 0;
+    const { PDFParse } = require("pdf-parse");
+    const parser = new PDFParse({ data: fileBuffer });
+    const textResult = await parser.getText();
 
-    const renderPage = (pageData: any) => {
-      return pageData
-        .getTextContent({ normalizeWhitespace: false, disableCombineTextItems: false })
-        .then((textContent: any) => {
-          pageCounter++;
-          let text = "";
-          for (const item of textContent.items) {
-            text += (item.str || "") + (item.hasEOL ? "\n" : " ");
-          }
-          pageTexts.push({ pageNum: pageCounter, text: text.trim() });
-          return text;
-        });
-    };
-
-    const pdfData = await pdfParse(fileBuffer, {
-      pagerender: renderPage,
-      max: 0,
-    });
-
-    detectedTotalPages = Math.max(1, pdfData.numpages || pageTexts.length);
+    if (textResult && Array.isArray(textResult.pages)) {
+      for (const p of textResult.pages) {
+        pageTexts.push({ pageNum: p.num, text: (p.text || "").trim() });
+      }
+      detectedTotalPages = Math.max(1, textResult.total || pageTexts.length);
+    }
+    await parser.destroy();
   } catch (err: any) {
     console.error("PDF extraction error:", err);
     throw new Error(`Failed to extract text from PDF: ${err?.message || "Corrupted or encrypted PDF."}`);
@@ -253,9 +241,9 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
   const processedBook: Book = {
     id: bookId,
     title: title.trim() || fileName.replace(/\.[^/.]+$/, ""),
-    author: author.trim() || "Academic Publication",
-    edition: "Verified PDF Upload",
-    subject: subject.trim() || "General Studies",
+    author: author.trim() || "Unknown Author",
+    edition: "1st Edition",
+    subject: subject.trim() || "General",
     totalPages: pages.length,
     chapters,
     pages,
@@ -334,7 +322,34 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
     }
   }
 
-  // 4d. Ingest all chunks with vector embeddings if text chunks exist
+  // 4d. Ingest real chapters and sections into database
+  if (chapters.length > 0) {
+    for (const ch of chapters) {
+      const { data: chRecord, error: chErr } = await supabase
+        .from("chapters")
+        .insert({
+          book_id: dbBookId,
+          number: ch.number,
+          title: ch.title,
+          start_page: ch.startPage,
+          end_page: ch.endPage,
+        })
+        .select("id")
+        .single();
+
+      if (!chErr && chRecord && ch.sections.length > 0) {
+        const secRecords = ch.sections.map((sec) => ({
+          chapter_id: chRecord.id,
+          number: sec.number,
+          title: sec.title,
+          page_number: sec.page,
+        }));
+        await supabase.from("sections").insert(secRecords);
+      }
+    }
+  }
+
+  // 4e. Ingest all chunks with vector embeddings if text chunks exist
   if (allChunks.length > 0) {
     const chunkTexts = allChunks.map((c) => c.text);
     const embeddings = await generateBatchEmbeddings(chunkTexts, 5);

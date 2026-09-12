@@ -6,12 +6,46 @@ import { checkRateLimit, validateChatInput } from "@/lib/security/rate-limit";
 import { authenticateRequest, verifyBookOwnership, verifyConversationOwnership } from "@/lib/supabase/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  getConversationsForUser,
+  getConversationWithMessages,
+  createConversation,
+  renameConversation,
+  deleteConversation,
+  saveMessage,
+} from "@/lib/conversations/service";
 
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Rate Limiting: Max 30 chat requests per minute per IP
+    const auth = await authenticateRequest(req);
+    const userId = auth?.id;
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: "Authentication required to query the AI Tutor." },
+        { status: 401 }
+      );
+    }
+
+    const body = await req.json();
+
+    // Support dedicated action to create a new conversation thread
+    if (body.action === "create_conversation") {
+      const { bookId, title } = body;
+      if (!bookId) {
+        return NextResponse.json({ error: "Book ID is required." }, { status: 400 });
+      }
+      const isOwner = await verifyBookOwnership(userId, bookId);
+      if (!isOwner) {
+        return NextResponse.json({ error: "Access denied." }, { status: 403 });
+      }
+      const newConv = await createConversation(userId, bookId, title);
+      return NextResponse.json({ success: true, conversation: newConv });
+    }
+
+    // Rate Limiting: Max 30 chat requests per minute per IP
     const ip = req.headers.get("x-forwarded-for") || "local-client";
     const limitCheck = checkRateLimit(`chat-${ip}`, { limit: 30, windowMs: 60 * 1000 });
     if (!limitCheck.allowed) {
@@ -21,9 +55,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const body = await req.json();
-
-    // 2. Validate input constraints
+    // Validate input constraints
     const validation = validateChatInput(body);
     if (!validation.isValid) {
       return NextResponse.json(
@@ -42,22 +74,8 @@ export async function POST(req: NextRequest) {
       conversationId,
     } = body;
 
-    // 3. Authentication & Ownership Verification
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Authentication required to query the AI Tutor." },
-        { status: 401 }
-      );
-    }
-
     if (!bookId) {
-      return NextResponse.json(
-        { error: "Book ID is required." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Book ID is required." }, { status: 400 });
     }
 
     // Verify ownership of the book
@@ -70,21 +88,28 @@ export async function POST(req: NextRequest) {
     }
 
     // If conversation ID is specified, verify ownership
-    if (conversationId) {
-      const isConvOwner = await verifyConversationOwnership(userId, conversationId, bookId);
+    let activeConvId = conversationId;
+    if (activeConvId) {
+      const isConvOwner = await verifyConversationOwnership(userId, activeConvId, bookId);
       if (!isConvOwner) {
         return NextResponse.json(
           { error: "Access denied. You do not have permission to access this conversation." },
           { status: 403 }
         );
       }
+    } else {
+      // Create new conversation automatically if none active
+      const newConv = await createConversation(userId, bookId, question.slice(0, 50));
+      if (newConv) {
+        activeConvId = newConv.id;
+      }
     }
 
-    // 4. Resolve Target Book Context Authoritatively from Database
+    // Resolve Target Book Context Authoritatively from Database
     let targetBook: Book | null = null;
     let targetVideo: VideoLecture | undefined = undefined;
 
-    const supabase = await createServerSupabaseClient() || createAdminClient();
+    const supabase = (await createServerSupabaseClient()) || createAdminClient();
     if (supabase) {
       const { data: bookRecord, error: bookErr } = await supabase
         .from("books")
@@ -147,7 +172,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 5. Fail-Closed Hybrid Context Retrieval
+    // Fail-Closed Grounded RAG Context Retrieval
     const ragContext = await retrieveRelevantContext(
       question,
       targetBook,
@@ -158,7 +183,12 @@ export async function POST(req: NextRequest) {
       userId
     );
 
-    // 6. Streaming Response with SSE
+    // Save user message immediately to conversation
+    if (activeConvId) {
+      await saveMessage(userId, activeConvId, "user", question, learningMode);
+    }
+
+    // Streaming Response with SSE
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
@@ -173,73 +203,22 @@ export async function POST(req: NextRequest) {
                 controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
               },
               onComplete: async (fullText) => {
-                // Persist conversation & messages if user is authenticated and not demo book
-                if (userId && ragContext.activeBook.id && !ragContext.activeBook.id.startsWith("demo-")) {
-                  try {
-                    const supabase = await createServerSupabaseClient();
-                    if (supabase) {
-                      let activeConvId = conversationId;
-                      if (!activeConvId) {
-                        const { data: conv } = await supabase
-                          .from("conversations")
-                          .insert({
-                            user_id: userId,
-                            book_id: ragContext.activeBook.id,
-                            title: question.slice(0, 60),
-                          })
-                          .select("id")
-                          .single();
-                        if (conv) activeConvId = conv.id;
-                      }
-
-                      if (activeConvId) {
-                        // Insert User message
-                        await supabase.from("messages").insert({
-                          conversation_id: activeConvId,
-                          sender: "user",
-                          content: question,
-                          learning_mode: learningMode,
-                          context_snapshot: {
-                            pageNumber,
-                            selectedText: selectedText || null,
-                            bookId: ragContext.activeBook.id,
-                          },
-                        });
-
-                        // Insert AI Assistant message with citations
-                        const { data: aiMsg } = await supabase
-                          .from("messages")
-                          .insert({
-                            conversation_id: activeConvId,
-                            sender: "ai",
-                            content: fullText,
-                            learning_mode: learningMode,
-                          })
-                          .select("id")
-                          .single();
-
-                        if (aiMsg && ragContext.citations?.length > 0) {
-                          const citationRecords = ragContext.citations.map((c) => ({
-                            message_id: aiMsg.id,
-                            chunk_id: c.id.startsWith("cite-chunk-") ? c.id.replace("cite-chunk-", "") : null,
-                            book_title: c.bookTitle,
-                            chapter_title: c.chapter,
-                            section_title: c.section,
-                            page_number: c.pageNumber,
-                            excerpt: c.excerpt,
-                          }));
-                          await supabase.from("message_citations").insert(citationRecords);
-                        }
-                      }
-                    }
-                  } catch (dbErr) {
-                    console.warn("Message persistence note:", dbErr);
-                  }
+                // Save AI Assistant response message and citations to database
+                if (activeConvId) {
+                  await saveMessage(
+                    userId,
+                    activeConvId,
+                    "ai",
+                    fullText,
+                    learningMode,
+                    ragContext.citations
+                  );
                 }
 
                 const payload = JSON.stringify({
                   type: "done",
                   fullText,
+                  conversationId: activeConvId,
                   citations: ragContext.citations,
                   retrievalMode: ragContext.retrievalMode,
                   suggestedFollowUps: [
@@ -293,6 +272,8 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const bookId = searchParams.get("bookId");
+    const conversationId = searchParams.get("conversationId");
+    const listOnly = searchParams.get("list") === "true";
 
     const auth = await authenticateRequest(req);
     const userId = auth?.id;
@@ -310,58 +291,100 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Access denied." }, { status: 403 });
     }
 
-    const supabase = (await createServerSupabaseClient()) || createAdminClient();
-    if (!supabase) {
-      return NextResponse.json({ success: true, messages: [] });
+    // Return conversation list for this book
+    if (listOnly) {
+      const conversations = await getConversationsForUser(userId, bookId);
+      return NextResponse.json({ success: true, conversations });
     }
 
-    // Find the latest active conversation for this book
-    const { data: conv } = await supabase
-      .from("conversations")
-      .select("id, title")
-      .eq("user_id", userId)
-      .eq("book_id", bookId)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (!conv) {
-      return NextResponse.json({ success: true, conversationId: null, messages: [] });
+    // Return messages for a specific conversation ID
+    if (conversationId) {
+      const isConvOwner = await verifyConversationOwnership(userId, conversationId, bookId);
+      if (!isConvOwner) {
+        return NextResponse.json({ error: "Access denied to this conversation." }, { status: 403 });
+      }
+      const record = await getConversationWithMessages(userId, conversationId);
+      return NextResponse.json({
+        success: true,
+        conversationId: record?.id || conversationId,
+        title: record?.title,
+        messages: record?.messages || [],
+      });
     }
 
-    // Fetch messages for this conversation
-    const { data: messagesData, error: msgErr } = await supabase
-      .from("messages")
-      .select("*, message_citations(*)")
-      .eq("conversation_id", conv.id)
-      .order("created_at", { ascending: true });
-
-    if (msgErr || !messagesData) {
-      return NextResponse.json({ success: true, conversationId: conv.id, messages: [] });
+    // Default: find the latest active conversation for this book
+    const conversations = await getConversationsForUser(userId, bookId);
+    if (conversations.length === 0) {
+      return NextResponse.json({
+        success: true,
+        conversationId: null,
+        conversations: [],
+        messages: [],
+      });
     }
 
-    const messages = messagesData.map((m: any) => ({
-      id: m.id,
-      sender: m.role === "user" ? "user" : "ai",
-      content: m.content,
-      timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      learningMode: m.learning_mode,
-      citations: (m.message_citations || []).map((c: any) => ({
-        id: c.id,
-        sourceType: c.source_type,
-        bookTitle: c.source_title,
-        pageNumber: c.page_number,
-        excerpt: c.excerpt,
-      })),
-    }));
+    const latestConv = conversations[0];
+    const record = await getConversationWithMessages(userId, latestConv.id);
 
     return NextResponse.json({
       success: true,
-      conversationId: conv.id,
-      messages,
+      conversationId: latestConv.id,
+      title: latestConv.title,
+      conversations,
+      messages: record?.messages || [],
     });
   } catch (error: any) {
     console.error("Fetch chat history error:", error);
-    return NextResponse.json({ success: true, messages: [] });
+    return NextResponse.json({ success: true, conversations: [], messages: [] });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const auth = await authenticateRequest(req);
+    const userId = auth?.id;
+
+    if (!userId) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+
+    const body = await req.json();
+    const { conversationId, title } = body;
+
+    if (!conversationId || !title) {
+      return NextResponse.json({ error: "Conversation ID and title are required." }, { status: 400 });
+    }
+
+    const updated = await renameConversation(userId, conversationId, title);
+    if (!updated) {
+      return NextResponse.json({ error: "Failed to rename conversation." }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    return NextResponse.json({ error: "Failed to rename conversation." }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const conversationId = searchParams.get("conversationId");
+
+    const auth = await authenticateRequest(req);
+    const userId = auth?.id;
+
+    if (!userId || !conversationId) {
+      return NextResponse.json({ error: "Authentication and conversationId required." }, { status: 400 });
+    }
+
+    const deleted = await deleteConversation(userId, conversationId);
+    if (!deleted) {
+      return NextResponse.json({ error: "Failed to delete conversation." }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    return NextResponse.json({ error: "Failed to delete conversation." }, { status: 500 });
   }
 }

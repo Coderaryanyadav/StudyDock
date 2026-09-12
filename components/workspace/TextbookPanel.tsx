@@ -21,7 +21,7 @@ import {
   Check,
   Eye,
 } from "lucide-react";
-import { Book, BookPage, Highlight, LearningMode } from "@/types";
+import { Book, BookPage, Highlight, LearningMode, Note } from "@/types";
 import { TextbookSelectionToolbar } from "./TextbookSelectionToolbar";
 import { PdfViewer } from "./PdfViewer";
 import { renderMathInText } from "@/lib/katex-renderer";
@@ -47,19 +47,45 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
   const [showToc, setShowToc] = useState<boolean>(false);
   const [showBookmarks, setShowBookmarks] = useState<boolean>(false);
   const [showHighlights, setShowHighlights] = useState<boolean>(false);
+  const [showNotes, setShowNotes] = useState<boolean>(false);
   const [viewMode, setViewMode] = useState<"pdf" | "text">("pdf");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [bookmarks, setBookmarks] = useState<number[]>([]);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [newNoteContent, setNewNoteContent] = useState<string>("");
+  const [noteSelectedText, setNoteSelectedText] = useState<string>("");
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState<string>("");
   const [selectedHighlightColor, setSelectedHighlightColor] = useState<"yellow" | "green" | "blue" | "pink">("yellow");
   const [selectionToolbarPos, setSelectionToolbarPos] = useState<{ x: number; y: number } | null>(null);
   const [selectedText, setSelectedText] = useState<string>("");
   const [copied, setCopied] = useState<boolean>(false);
-
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // 1. Load persistent annotations & bookmarks from database
+  const [currentSelectionCoords, setCurrentSelectionCoords] = useState<{
+    boundingRect?: any;
+    rects?: any[];
+  } | null>(null);
+  const [pageInputVal, setPageInputVal] = useState<string>(String(activePageNumber));
+
+  useEffect(() => {
+    setPageInputVal(String(activePageNumber));
+  }, [activePageNumber]);
+
+  const handlePageInputSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const parsed = parseInt(pageInputVal, 10);
+    const maxPages = book.totalPages || book.pages.length || 1;
+    if (!isNaN(parsed) && parsed >= 1 && parsed <= maxPages) {
+      onPageChange(parsed);
+    } else {
+      setPageInputVal(String(activePageNumber));
+    }
+  };
+
+  // 1. Load persistent annotations, bookmarks & notes from database
   useEffect(() => {
     if (!book?.id) return;
     fetch(`/api/annotations?bookId=${encodeURIComponent(book.id)}`)
@@ -75,6 +101,15 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
         }
       })
       .catch((err) => console.warn("Failed to load annotations:", err));
+
+    fetch(`/api/notes?bookId=${encodeURIComponent(book.id)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.notes)) {
+          setNotes(data.notes);
+        }
+      })
+      .catch((err) => console.warn("Failed to load notes:", err));
   }, [book?.id]);
 
   // Reset scroll position to top when page changes
@@ -139,6 +174,17 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
   ) => {
     if (!selectedText) return;
 
+    if (action === "note") {
+      setNoteSelectedText(selectedText);
+      setShowNotes(true);
+      setShowHighlights(false);
+      setShowBookmarks(false);
+      setShowToc(false);
+      setSelectionToolbarPos(null);
+      window.getSelection()?.removeAllRanges();
+      return;
+    }
+
     if (action === "highlight") {
       const tempId = `hl-${Date.now()}`;
       const newHl: Highlight = {
@@ -147,6 +193,8 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
         pageNumber: activePageNumber,
         text: selectedText,
         color: selectedHighlightColor,
+        boundingRect: currentSelectionCoords?.boundingRect,
+        rects: currentSelectionCoords?.rects,
         createdAt: new Date().toISOString(),
       };
       setHighlights((prev) => [newHl, ...prev]);
@@ -160,6 +208,8 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
           pageNumber: activePageNumber,
           text: selectedText,
           color: selectedHighlightColor,
+          boundingRect: currentSelectionCoords?.boundingRect,
+          rects: currentSelectionCoords?.rects,
         }),
       })
         .then((res) => res.json())
@@ -180,6 +230,84 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
     onAskAIWithSelection(selectedText, mode || (action as LearningMode));
     setSelectionToolbarPos(null);
     window.getSelection()?.removeAllRanges();
+  };
+
+  const handleCreateNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newNoteContent.trim() || !book?.id) return;
+
+    const tempId = `note-${Date.now()}`;
+    const newNoteObj: Note = {
+      id: tempId,
+      bookId: book.id,
+      pageNumber: activePageNumber,
+      selectedText: noteSelectedText || undefined,
+      content: newNoteContent.trim(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setNotes((prev) => [newNoteObj, ...prev]);
+    const contentToSave = newNoteContent.trim();
+    const selTextToSave = noteSelectedText;
+    setNewNoteContent("");
+    setNoteSelectedText("");
+
+    try {
+      const res = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookId: book.id,
+          pageNumber: activePageNumber,
+          selectedText: selTextToSave || undefined,
+          content: contentToSave,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.note) {
+        setNotes((prev) =>
+          prev.map((n) => (n.id === tempId ? data.note : n))
+        );
+      }
+    } catch (err) {
+      console.warn("Failed to persist note:", err);
+    }
+  };
+
+  const handleUpdateNote = async (noteId: string) => {
+    if (!editingContent.trim()) return;
+
+    setNotes((prev) =>
+      prev.map((n) => (n.id === noteId ? { ...n, content: editingContent.trim(), updatedAt: new Date().toISOString() } : n))
+    );
+    const contentToSave = editingContent.trim();
+    setEditingNoteId(null);
+    setEditingContent("");
+
+    try {
+      await fetch("/api/notes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: noteId,
+          content: contentToSave,
+        }),
+      });
+    } catch (err) {
+      console.warn("Failed to update note:", err);
+    }
+  };
+
+  const handleDeleteNote = async (noteId: string) => {
+    setNotes((prev) => prev.filter((n) => n.id !== noteId));
+    try {
+      await fetch(`/api/notes?id=${encodeURIComponent(noteId)}`, {
+        method: "DELETE",
+      });
+    } catch (err) {
+      console.warn("Failed to delete note:", err);
+    }
   };
 
   const toggleBookmark = () => {
@@ -262,16 +390,35 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
               setShowHighlights(!showHighlights);
               setShowToc(false);
               setShowBookmarks(false);
+              setShowNotes(false);
             }}
             className={`p-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors ${
               showHighlights
                 ? "bg-yellow-500/20 text-yellow-300 border border-yellow-500/40"
                 : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"
             }`}
-            title="Highlights & Notes"
+            title="Highlights"
           >
             <Highlighter className="w-4 h-4 text-yellow-400" />
             <span className="hidden md:inline">({highlights.length})</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setShowNotes(!showNotes);
+              setShowToc(false);
+              setShowBookmarks(false);
+              setShowHighlights(false);
+            }}
+            className={`p-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors ${
+              showNotes
+                ? "bg-indigo-600/30 text-indigo-300 border border-indigo-500/40"
+                : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"
+            }`}
+            title="Study Notes"
+          >
+            <FileText className="w-4 h-4 text-indigo-400" />
+            <span className="hidden md:inline">Notes ({notes.length})</span>
           </button>
 
           {/* View Mode Toggle: Original PDF vs Extracted Text */}
@@ -301,7 +448,7 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
         </div>
 
         {/* Center: Chapter info & Page Navigator */}
-        <div className="flex items-center gap-2 text-xs">
+        <div className="flex items-center gap-1.5 text-xs">
           <button
             disabled={activePageNumber <= 1}
             onClick={() => onPageChange(activePageNumber - 1)}
@@ -311,11 +458,30 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
             <ChevronLeft className="w-4 h-4" />
           </button>
 
-          <div className="flex items-center gap-1 font-mono bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800 shadow-inner">
-            <span className="text-indigo-400 font-semibold">{activePageNumber}</span>
+          <form
+            onSubmit={handlePageInputSubmit}
+            className="flex items-center gap-1 font-mono bg-slate-950 px-2 py-0.5 rounded-lg border border-slate-800 shadow-inner"
+          >
+            <input
+              type="text"
+              inputMode="numeric"
+              value={pageInputVal}
+              onChange={(e) => setPageInputVal(e.target.value)}
+              onBlur={() => {
+                const parsed = parseInt(pageInputVal, 10);
+                const maxPages = book.totalPages || book.pages.length || 1;
+                if (!isNaN(parsed) && parsed >= 1 && parsed <= maxPages && parsed !== activePageNumber) {
+                  onPageChange(parsed);
+                } else {
+                  setPageInputVal(String(activePageNumber));
+                }
+              }}
+              className="w-8 text-center bg-transparent text-indigo-400 font-semibold focus:outline-none focus:bg-slate-800 rounded text-xs"
+              title="Click or edit to jump directly to page number"
+            />
             <span className="text-slate-600">/</span>
-            <span className="text-slate-400">{book.totalPages || book.pages.length || 1}</span>
-          </div>
+            <span className="text-slate-400 text-xs pr-1">{book.totalPages || book.pages.length || 1}</span>
+          </form>
 
           <button
             disabled={activePageNumber >= (book.totalPages || book.pages.length || 1)}
@@ -594,6 +760,145 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
           </div>
         )}
 
+        {/* Study Notes Drawer */}
+        {showNotes && (
+          <div className="w-72 bg-slate-900 border-r border-slate-800 h-full overflow-y-auto p-3 text-xs z-10 flex flex-col shrink-0 animate-in slide-in-from-left duration-150 space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <span className="font-semibold text-indigo-300 flex items-center gap-1.5">
+                <FileText className="w-4 h-4 text-indigo-400" /> Study Notes ({notes.length})
+              </span>
+              <button
+                onClick={() => setShowNotes(false)}
+                className="text-slate-400 hover:text-slate-200 p-0.5 rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Create New Note Form */}
+            <form onSubmit={handleCreateNote} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between text-[10px] text-slate-400">
+                <span className="font-semibold text-slate-300">New Note (Page {activePageNumber})</span>
+                {noteSelectedText && (
+                  <button
+                    type="button"
+                    onClick={() => setNoteSelectedText("")}
+                    className="text-rose-400 hover:underline"
+                  >
+                    Clear Quote
+                  </button>
+                )}
+              </div>
+
+              {noteSelectedText && (
+                <div className="p-1.5 rounded bg-slate-900 text-[10px] text-slate-300 italic line-clamp-2 border-l-2 border-indigo-400">
+                  &ldquo;{noteSelectedText}&rdquo;
+                </div>
+              )}
+
+              <textarea
+                value={newNoteContent}
+                onChange={(e) => setNewNoteContent(e.target.value)}
+                placeholder="Type your notes or insights here..."
+                rows={3}
+                className="w-full bg-slate-900 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 resize-none"
+              />
+
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={!newNoteContent.trim()}
+                  className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-medium text-[11px] transition-colors shadow-sm"
+                >
+                  Save Note
+                </button>
+              </div>
+            </form>
+
+            {/* List of Notes */}
+            <div className="space-y-2 flex-1 overflow-y-auto">
+              {notes.length === 0 ? (
+                <div className="text-slate-500 italic py-2 text-center">
+                  No notes saved for this textbook yet. Write your thoughts above or select text to create a note.
+                </div>
+              ) : (
+                notes.map((n) => (
+                  <div
+                    key={n.id}
+                    className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between text-[10px] text-slate-400">
+                      <button
+                        onClick={() => {
+                          onPageChange(n.pageNumber);
+                          setShowNotes(false);
+                        }}
+                        className="font-mono text-indigo-400 font-semibold hover:underline flex items-center gap-1"
+                      >
+                        Page {n.pageNumber} →
+                      </button>
+                      <div className="flex items-center gap-1.5">
+                        {editingNoteId !== n.id && (
+                          <button
+                            onClick={() => {
+                              setEditingNoteId(n.id);
+                              setEditingContent(n.content);
+                            }}
+                            className="text-slate-400 hover:text-slate-200 text-[10px]"
+                          >
+                            Edit
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDeleteNote(n.id)}
+                          className="text-rose-400 hover:text-rose-300 text-[10px]"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+
+                    {n.selectedText && (
+                      <p className="text-slate-400 text-[10px] italic border-l border-slate-700 pl-1.5 line-clamp-2">
+                        &ldquo;{n.selectedText}&rdquo;
+                      </p>
+                    )}
+
+                    {editingNoteId === n.id ? (
+                      <div className="space-y-1.5 pt-1">
+                        <textarea
+                          value={editingContent}
+                          onChange={(e) => setEditingContent(e.target.value)}
+                          rows={3}
+                          className="w-full bg-slate-900 text-xs px-2 py-1 rounded border border-indigo-500 text-slate-200 focus:outline-none resize-none"
+                        />
+                        <div className="flex justify-end gap-1.5">
+                          <button
+                            onClick={() => setEditingNoteId(null)}
+                            className="px-2 py-0.5 rounded text-[10px] text-slate-400 hover:bg-slate-800"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => handleUpdateNote(n.id)}
+                            className="px-2 py-0.5 rounded text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white font-medium"
+                          >
+                            Save
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-slate-200 text-[11px] leading-relaxed whitespace-pre-wrap">
+                        {n.content}
+                      </p>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Digital Textbook Reading Canvas / Real PDF Canvas */}
         <div
           ref={contentRef}
@@ -617,6 +922,8 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
                 scale={zoomLevel / 100}
                 onPageChange={onPageChange}
                 onMouseUp={handleMouseUp}
+                onSelectionCoords={(coords) => setCurrentSelectionCoords(coords)}
+                highlights={highlights}
                 totalPages={book.totalPages || book.pages.length}
               />
             </div>

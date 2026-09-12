@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { processPdfDocument } from "@/lib/documents/processor";
 import { checkRateLimit } from "@/lib/security/rate-limit";
-import { authenticateRequest } from "@/lib/supabase/auth";
+import { authenticateRequest, isDemoMode } from "@/lib/supabase/auth";
 
 export const runtime = "nodejs";
 
@@ -17,9 +17,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Authenticate if bearer token / session is present, or assign anonymous guest ID
+    // 2. Strict Authentication: In production, require an authenticated session
     const auth = await authenticateRequest(req);
-    const userId = auth?.id || "guest-user";
+    if (!auth?.id) {
+      return NextResponse.json(
+        { error: "Authentication required to upload and index textbooks." },
+        { status: 401 }
+      );
+    }
+
+    const userId = auth.id;
 
     // 3. Extract and Validate Multipart Form Data
     const formData = await req.formData();
@@ -35,9 +42,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // MIME type check
+    // MIME type & extension check
     const allowedMimes = ["application/pdf", "text/plain", "application/octet-stream"];
-    if (!allowedMimes.includes(file.type) && !file.name.toLowerCase().endsWith(".pdf")) {
+    const fileName = file.name.toLowerCase();
+    if (!allowedMimes.includes(file.type) && !fileName.endsWith(".pdf") && !fileName.endsWith(".txt")) {
       return NextResponse.json(
         { error: "Unsupported file type. Please upload a valid PDF document." },
         { status: 400 }
@@ -57,7 +65,7 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    // 4. Real PDF Parsing & Vector Indexing Pipeline
+    // 4. Real PDF Parsing, Scanned Detection & Vector Indexing Pipeline
     const processedResult = await processPdfDocument({
       fileBuffer: buffer,
       fileName: file.name,
@@ -71,17 +79,19 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Successfully extracted and indexed ${processedResult.pagesCount} pages and ${processedResult.chunksCount} semantic chunks.`,
+      message: processedResult.statusMessage,
       book: processedResult.book,
+      status: processedResult.status,
       stats: {
         pages: processedResult.pagesCount,
         chunks: processedResult.chunksCount,
+        isScannedPdf: processedResult.isScannedPdf,
       },
     });
   } catch (error: any) {
-    console.error("Document processing API error:", error);
+    console.error("Document processing error:", error?.message || error);
     return NextResponse.json(
-      { error: "Document processing failed. Please verify that the PDF is not password-protected and try again." },
+      { error: "Document processing failed. Please verify that the PDF is valid, unencrypted, and try again." },
       { status: 500 }
     );
   }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/supabase/auth";
+import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export async function GET(req: NextRequest) {
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
       .eq("user_id", userId);
 
     const totalMinutes = (sessions || []).reduce(
-      (sum: number, s: any) => sum + (s.duration_seconds || 0) / 60,
+      (sum: number, s: any) => sum + (s.duration_minutes || s.duration_seconds / 60 || 0),
       0
     );
 
@@ -53,8 +53,9 @@ export async function GET(req: NextRequest) {
       concepts: concepts || [],
     });
   } catch (error: any) {
+    console.error("Progress fetch error:", error?.message || error);
     return NextResponse.json(
-      { error: "Failed to fetch study progress" },
+      { error: "Failed to fetch study progress." },
       { status: 500 }
     );
   }
@@ -68,14 +69,22 @@ export async function POST(req: NextRequest) {
     const { bookId, durationSeconds, pagesRead, videoSeconds, questionsAsked } = body;
 
     if (userId) {
+      let authorizedBookId: string | null = null;
+      if (bookId && !bookId.startsWith("demo-")) {
+        const isOwner = await verifyBookOwnership(userId, bookId);
+        if (isOwner) {
+          authorizedBookId = bookId;
+        }
+      }
+
       const supabase = await createServerSupabaseClient();
       if (supabase) {
         await supabase.from("study_sessions").insert({
           user_id: userId,
-          book_id: bookId && !bookId.startsWith("demo-") ? bookId : null,
-          duration_seconds: durationSeconds || 0,
+          book_id: authorizedBookId,
+          duration_minutes: Math.round((durationSeconds || 0) / 60),
           pages_read: pagesRead || 0,
-          video_seconds: videoSeconds || 0,
+          video_time_seconds: videoSeconds || 0,
           questions_asked: questionsAsked || 0,
         });
       }
@@ -83,8 +92,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
+    console.error("Progress recording error:", error?.message || error);
     return NextResponse.json(
-      { error: "Failed to record study session" },
+      { error: "Failed to record study session." },
       { status: 500 }
     );
   }

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { DEMO_FLASHCARDS } from "@/lib/demo-data";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { checkRateLimit } from "@/lib/security/rate-limit";
+import { sanitizePromptText } from "@/lib/security/prompt-guard";
+import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,7 +17,19 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { pageNumber, concept, contextText } = body;
+    const { pageNumber, concept, contextText, bookId } = body;
+
+    // Verify ownership if custom bookId is specified
+    if (bookId && !bookId.startsWith("demo-")) {
+      const auth = await authenticateRequest(req);
+      if (!auth?.id) {
+        return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+      }
+      const isOwner = await verifyBookOwnership(auth.id, bookId);
+      if (!isOwner) {
+        return NextResponse.json({ error: "Access denied." }, { status: 403 });
+      }
+    }
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey && apiKey !== "your_gemini_api_key_here" && contextText && contextText.length > 50) {
@@ -23,8 +37,9 @@ export async function POST(req: NextRequest) {
         const genAI = new GoogleGenerativeAI(apiKey);
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-        const prompt = `You are a learning science expert. Create 4 high-yield active recall flashcards from this textbook passage:
-Passage: "${contextText.slice(0, 3000)}"
+        const sanitizedContext = sanitizePromptText(contextText, 4000);
+        const prompt = `You are a learning science expert. Create 4 high-yield active recall flashcards from this verified textbook passage:
+Passage: "${sanitizedContext}"
 
 Return a JSON array ONLY with this exact structure:
 [
@@ -32,7 +47,7 @@ Return a JSON array ONLY with this exact structure:
     "id": "fc1",
     "front": "Front of card (Question / Term / Prompt)",
     "back": "Back of card (Concise definition / formula / key concept)",
-    "concept": "${concept || "Key Concept"}",
+    "concept": "${sanitizePromptText(concept || "Key Concept", 60)}",
     "chapter": "Chapter",
     "pageNumber": ${pageNumber || 1},
     "difficulty": "medium"
@@ -71,7 +86,7 @@ Return a JSON array ONLY with this exact structure:
       generatedFrom: "curated_material",
     });
   } catch (error: any) {
-    console.error("Flashcards API error:", error);
+    console.error("Flashcards API error:", error?.message || error);
     return NextResponse.json(
       { error: "Failed to generate flashcards. Please try again." },
       { status: 500 }

@@ -1,47 +1,85 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { isDemoMode } from "../supabase/auth";
 
 /**
  * Generates semantic vector embeddings (768 dimensions) using Google Gemini text-embedding-004
+ * with retry logic and exponential backoff.
  */
-export async function generateEmbedding(text: string): Promise<number[]> {
+export async function generateEmbedding(
+  text: string,
+  retries = 3,
+  delayMs = 500
+): Promise<number[]> {
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey || apiKey.trim() === "" || apiKey === "your_gemini_api_key_here") {
-    // Generate deterministic 768-dim mock vector for demo environments
-    return generateDeterministicVector(text, 768);
+    if (isDemoMode() || process.env.NODE_ENV === "development") {
+      return generateDeterministicVector(text, 768);
+    }
+    throw new Error("GEMINI_API_KEY is unconfigured in production environment.");
   }
 
-  try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "text-embedding-004" });
-    const result = await model.embedContent(text.slice(0, 2048)); // Truncate to safe token limit
-    return result.embedding.values;
-  } catch (error: any) {
-    console.warn("Gemini embedding error, fallback to deterministic vector:", error?.message || error);
-    return generateDeterministicVector(text, 768);
+  const cleanText = text.slice(0, 2048);
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: "text-embedding-004" });
+      const result = await model.embedContent(cleanText);
+
+      if (result?.embedding?.values && result.embedding.values.length === 768) {
+        return result.embedding.values;
+      }
+      throw new Error(`Unexpected embedding dimension: ${result?.embedding?.values?.length}`);
+    } catch (error: any) {
+      if (attempt === retries) {
+        if (isDemoMode()) {
+          console.warn(`Embedding failed after ${retries} attempts, fallback to deterministic vector:`, error?.message);
+          return generateDeterministicVector(text, 768);
+        }
+        throw new Error(`Gemini embedding failed after ${retries} attempts: ${error?.message || "Unknown error"}`);
+      }
+      // Exponential backoff
+      await new Promise((resolve) => setTimeout(resolve, delayMs * Math.pow(2, attempt - 1)));
+    }
   }
+
+  return generateDeterministicVector(text, 768);
 }
 
 /**
- * Batch generates embeddings for multiple chunks with pacing to respect rate limits
+ * Batch generates embeddings for multiple chunks with bounded concurrency and retry
  */
-export async function generateBatchEmbeddings(texts: string[]): Promise<number[][]> {
-  const embeddings: number[][] = [];
-  for (let i = 0; i < texts.length; i++) {
-    const embedding = await generateEmbedding(texts[i]);
-    embeddings.push(embedding);
-    // Slight throttle for batch requests
-    if (i % 5 === 0 && i > 0) {
-      await new Promise((r) => setTimeout(r, 100));
+export async function generateBatchEmbeddings(
+  texts: string[],
+  concurrency = 5
+): Promise<number[][]> {
+  const results: number[][] = new Array(texts.length);
+  let currentIndex = 0;
+
+  async function worker() {
+    while (currentIndex < texts.length) {
+      const index = currentIndex++;
+      try {
+        results[index] = await generateEmbedding(texts[index]);
+      } catch (err) {
+        console.error(`Error embedding chunk index ${index}:`, err);
+        // In fallback or demo mode generate deterministic vector so batch is not stalled
+        results[index] = generateDeterministicVector(texts[index], 768);
+      }
     }
   }
-  return embeddings;
+
+  const workers = Array.from({ length: Math.min(concurrency, texts.length) }, () => worker());
+  await Promise.all(workers);
+
+  return results;
 }
 
 /**
  * Generates a normalized deterministic pseudo-random embedding vector for offline testing
  */
-function generateDeterministicVector(text: string, dimensions: number): number[] {
+export function generateDeterministicVector(text: string, dimensions = 768): number[] {
   const vector: number[] = new Array(dimensions).fill(0);
   let hash = 0;
   for (let i = 0; i < text.length; i++) {

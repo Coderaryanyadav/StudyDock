@@ -1,6 +1,5 @@
 /**
- * StudyDock In-Memory Token Bucket / Window Rate Limiter
- * Provides request throttling for AI Chat, Document Processing, and Embeddings
+ * StudyDock In-Memory Token Bucket / Window Rate Limiter & Input Validation
  */
 
 interface RateLimitRecord {
@@ -62,4 +61,54 @@ export function checkRateLimit(
     remaining: limit - record.count,
     resetInSec: Math.ceil((record.resetAt - now) / 1000),
   };
+}
+
+/**
+ * Validates incoming chat request parameters for boundaries and constraints
+ */
+export function validateChatInput(body: any): { isValid: boolean; error?: string } {
+  if (!body || typeof body !== "object") {
+    return { isValid: false, error: "Invalid request payload format." };
+  }
+
+  const { question, pageNumber, selectedText, learningMode, videoTimestampSeconds } = body;
+
+  if (!question || typeof question !== "string" || question.trim().length === 0) {
+    return { isValid: false, error: "Question cannot be empty." };
+  }
+
+  if (question.length > 2000) {
+    return { isValid: false, error: "Question exceeds maximum length of 2000 characters." };
+  }
+
+  if (selectedText && typeof selectedText === "string" && selectedText.length > 3000) {
+    return { isValid: false, error: "Selected text context exceeds 3000 characters." };
+  }
+
+  if (pageNumber !== undefined && (typeof pageNumber !== "number" || pageNumber < 1 || pageNumber > 5000)) {
+    return { isValid: false, error: "Invalid textbook page number." };
+  }
+
+  if (videoTimestampSeconds !== undefined && (typeof videoTimestampSeconds !== "number" || videoTimestampSeconds < 0)) {
+    return { isValid: false, error: "Invalid video timestamp." };
+  }
+
+  const allowedModes = [
+    "explain",
+    "beginner",
+    "deep_dive",
+    "example",
+    "quiz",
+    "exam",
+    "flashcards",
+    "summary",
+    "teach_me",
+    "socratic",
+  ];
+
+  if (learningMode && !allowedModes.includes(learningMode)) {
+    return { isValid: false, error: "Unsupported learning mode specified." };
+  }
+
+  return { isValid: true };
 }

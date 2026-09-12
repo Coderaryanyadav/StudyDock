@@ -1,6 +1,6 @@
 const pdfParse = require("pdf-parse");
 import { Book, BookChunk, BookPage, Chapter } from "@/types";
-import { generateEmbedding } from "@/lib/rag/embeddings";
+import { generateBatchEmbeddings } from "@/lib/rag/embeddings";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export interface ProcessDocumentOptions {
@@ -10,26 +10,44 @@ export interface ProcessDocumentOptions {
   mimeType: string;
   userId: string;
   title: string;
-  author: string;
-  subject: string;
+  author?: string;
+  subject?: string;
 }
+
+export type DocumentProcessingStatus =
+  | "UPLOADING"
+  | "PROCESSING"
+  | "EMBEDDING"
+  | "READY"
+  | "PARTIALLY_INDEXED"
+  | "OCR_REQUIRED"
+  | "FAILED";
 
 export interface ProcessedDocumentResult {
   book: Book;
   chunksCount: number;
   pagesCount: number;
   storagePath?: string;
+  status: DocumentProcessingStatus;
+  statusMessage?: string;
+  isScannedPdf?: boolean;
 }
 
 /**
- * Extracts key terms from text
+ * Extracts key domain terms from text without common stopwords
  */
 function extractKeyTerms(text: string): string[] {
+  const stopwords = new Set([
+    "which", "their", "there", "about", "would", "these", "other",
+    "where", "could", "should", "after", "before", "during", "while",
+    "under", "above", "between", "through", "because", "against"
+  ]);
+
   const words = text
     .toLowerCase()
     .replace(/[^\w\s]/g, "")
     .split(/\s+/)
-    .filter((w) => w.length > 4 && !["which", "their", "there", "about", "would", "these", "other"].includes(w));
+    .filter((w) => w.length > 4 && !stopwords.has(w));
 
   const freq: Record<string, number> = {};
   for (const w of words) {
@@ -47,8 +65,8 @@ function extractKeyTerms(text: string): string[] {
  */
 function chunkText(
   text: string,
-  maxChunkChars: number = 800,
-  overlapChars: number = 150
+  maxChunkChars = 800,
+  overlapChars = 150
 ): string[] {
   const sentences = text.match(/[^.!?]+[.!?]+(\s+|$)|[^.!?]+$/g) || [text];
   const chunks: string[] = [];
@@ -73,7 +91,8 @@ function chunkText(
 }
 
 /**
- * Real PDF document processing pipeline
+ * Real PDF document processing pipeline with full chunk indexing,
+ * scanned PDF detection, chapter extraction, and idempotent pgvector ingestion.
  */
 export async function processPdfDocument(options: ProcessDocumentOptions): Promise<ProcessedDocumentResult> {
   const {
@@ -83,20 +102,26 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
     mimeType,
     userId,
     title,
-    author,
-    subject,
+    author = "Academic Publication",
+    subject = "General Studies",
   } = options;
+
+  if (!userId || userId === "guest-user") {
+    throw new Error("Authentication required for document indexing.");
+  }
 
   // 1. Validate PDF signature (magic bytes: %PDF-)
   const header = fileBuffer.slice(0, 5).toString("utf-8");
   if (!header.startsWith("%PDF")) {
-    throw new Error("Invalid document format: Missing valid PDF header signature.");
+    throw new Error("Invalid document format: Missing valid PDF header signature (%PDF-).");
   }
 
   // 2. Extract text and pages with pdf-parse
-  let pdfData: { numpages: number; text: string };
+  let pdfData: { numpages: number; text: string; info?: any };
   try {
-    pdfData = await pdfParse(fileBuffer);
+    pdfData = await pdfParse(fileBuffer, {
+      max: 0, // Extract all pages
+    });
   } catch (err: any) {
     console.error("PDF extraction error:", err);
     throw new Error(`Failed to extract text from PDF: ${err?.message || "Corrupted or encrypted PDF."}`);
@@ -106,24 +131,32 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
   const bookId = `book-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
   // 3. Page splitting heuristic
-  // pdf-parse provides full text with form feeds (\f) between pages in standard PDFs
-  const rawPageTexts = pdfData.text.split("\f").filter((t) => t.trim().length > 0);
+  const rawPageTexts = pdfData.text.split("\f").filter((t: string) => t.trim().length > 0);
   const pages: BookPage[] = [];
   const chapters: Chapter[] = [];
   const allChunks: BookChunk[] = [];
 
   let currentChapterNum = 1;
-  let currentChapterTitle = "Chapter 1: Foundations & Overview";
-  let currentSectionTitle = "1.1 Introduction";
+  let currentChapterTitle = "Uncategorized";
+  let currentSectionTitle = "1.1 Content";
 
-  const numPagesToProcess = rawPageTexts.length > 0 ? rawPageTexts.length : Math.min(totalPages, 50);
+  // Check if PDF is a scanned image PDF (minimal or zero extractable text)
+  let totalExtractedLength = 0;
+  let emptyPageCount = 0;
+
+  const numPagesToProcess = rawPageTexts.length > 0 ? rawPageTexts.length : Math.min(totalPages, 500);
 
   for (let i = 0; i < numPagesToProcess; i++) {
     const pageNum = i + 1;
-    const pageText = rawPageTexts[i] || `Page ${pageNum} content extracted from ${fileName}.\n\n` + pdfData.text.slice(i * 1200, (i + 1) * 1200);
+    const pageText = (rawPageTexts[i] || "").trim();
+    totalExtractedLength += pageText.length;
 
-    // Detect chapter headings e.g. "Chapter 3: Transport Layer" or "3.1 TCP Handshake"
-    const chapterMatch = pageText.match(/(?:Chapter|CHAPTER)\s+(\d+)[:\.\s]+([^\n\r]+)/i);
+    if (pageText.length < 50) {
+      emptyPageCount++;
+    }
+
+    // Detect chapter headings e.g. "Chapter 3: Transport Layer" or "MODULE 2"
+    const chapterMatch = pageText.match(/(?:Chapter|CHAPTER|UNIT|MODULE)\s+(\d+)[:\.\s]+([^\n\r]+)/i);
     if (chapterMatch) {
       currentChapterNum = parseInt(chapterMatch[1], 10) || currentChapterNum + 1;
       currentChapterTitle = `Chapter ${currentChapterNum}: ${chapterMatch[2].trim()}`;
@@ -134,11 +167,10 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
       currentSectionTitle = `${sectionMatch[1]} ${sectionMatch[2].trim()}`;
     }
 
-    // Key takeaways extraction
     const keyTerms = extractKeyTerms(pageText);
     const keyTakeaways = [
-      `Key concepts identified: ${keyTerms.slice(0, 4).join(", ")}.`,
-      `Extracted from verified source: ${title} (Page ${pageNum}).`,
+      keyTerms.length > 0 ? `Key concepts: ${keyTerms.slice(0, 4).join(", ")}.` : "Extracted textbook page.",
+      `Source: ${title} (Page ${pageNum}).`,
     ];
 
     const bookPage: BookPage = {
@@ -148,29 +180,44 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
       sectionId: `sec-${pageNum}`,
       sectionTitle: currentSectionTitle,
       title: `${currentSectionTitle} (p.${pageNum})`,
-      content: pageText.trim(),
+      content: pageText || `[Page ${pageNum} contains visual or graphical elements]`,
       keyTakeaways,
     };
     pages.push(bookPage);
 
     // Create intelligent chunks for this page
-    const textChunks = chunkText(pageText);
-    for (let c = 0; c < textChunks.length; c++) {
-      const chunkTextContent = textChunks[c];
-      const chunkTerms = extractKeyTerms(chunkTextContent);
+    if (pageText.length >= 30) {
+      const textChunks = chunkText(pageText);
+      for (let c = 0; c < textChunks.length; c++) {
+        const chunkTextContent = textChunks[c];
+        const chunkTerms = extractKeyTerms(chunkTextContent);
 
-      allChunks.push({
-        id: `chunk-${bookId}-${pageNum}-${c + 1}`,
-        bookId,
-        chapterId: `ch-${currentChapterNum}`,
-        chapterTitle: currentChapterTitle,
-        sectionId: `sec-${pageNum}`,
-        sectionTitle: currentSectionTitle,
-        pageNumber: pageNum,
-        text: chunkTextContent,
-        keyTerms: chunkTerms,
-      });
+        allChunks.push({
+          id: `chunk-${bookId}-${pageNum}-${c + 1}`,
+          bookId,
+          chapterId: `ch-${currentChapterNum}`,
+          chapterTitle: currentChapterTitle,
+          sectionId: `sec-${pageNum}`,
+          sectionTitle: currentSectionTitle,
+          pageNumber: pageNum,
+          text: chunkTextContent,
+          keyTerms: chunkTerms,
+        });
+      }
     }
+  }
+
+  // Scanned PDF / OCR required check
+  const isScannedPdf = totalExtractedLength < 100 || (emptyPageCount / totalPages) > 0.8;
+  let processingStatus: DocumentProcessingStatus = "READY";
+  let statusMessage = "Document successfully parsed and indexed for RAG.";
+
+  if (isScannedPdf) {
+    processingStatus = "OCR_REQUIRED";
+    statusMessage = "Document appears to be scanned image PDF. OCR is required to extract full text.";
+  } else if (emptyPageCount > 0) {
+    processingStatus = "PARTIALLY_INDEXED";
+    statusMessage = `Indexed ${pages.length - emptyPageCount} of ${pages.length} pages. Some pages contained only images.`;
   }
 
   // Build chapter structure
@@ -180,7 +227,7 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
     title: currentChapterTitle,
     startPage: 1,
     endPage: pages.length,
-    sections: pages.slice(0, 8).map((p) => ({
+    sections: pages.slice(0, 10).map((p) => ({
       id: p.sectionId,
       number: p.sectionTitle.split(" ")[0] || "1.1",
       title: p.sectionTitle,
@@ -200,26 +247,26 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
     chunks: allChunks,
   };
 
-  // 4. If Supabase Admin Client is configured, persist to database and private storage
+  // 4. Secure Storage & Supabase Database Ingestion
   const supabase = createAdminClient();
   let storagePath: string | undefined;
 
-  if (supabase) {
+  if (supabase && userId && !userId.startsWith("demo-")) {
     try {
-      // Upload PDF to private bucket
-      const cleanFileName = `${userId}/${Date.now()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      // 4a. Upload PDF to private bucket under scoped path: textbooks/{userId}/{bookId}/original.pdf
+      const cleanStoragePath = `${userId}/${bookId}/original.pdf`;
       const { data: uploadData, error: uploadErr } = await supabase.storage
         .from("textbooks")
-        .upload(cleanFileName, fileBuffer, {
+        .upload(cleanStoragePath, fileBuffer, {
           contentType: mimeType,
-          upsert: false,
+          upsert: true,
         });
 
       if (!uploadErr && uploadData) {
         storagePath = uploadData.path;
       }
 
-      // Insert Book record
+      // 4b. Insert Book record
       const { data: bookRecord, error: bookErr } = await supabase
         .from("books")
         .insert({
@@ -229,26 +276,40 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
           edition: processedBook.edition,
           subject: processedBook.subject,
           total_pages: processedBook.totalPages,
-          storage_path: storagePath,
+          storage_path: storagePath || cleanStoragePath,
           file_size_bytes: fileSizeBytes,
           mime_type: mimeType,
-          status: "READY",
+          status: processingStatus,
+          status_message: statusMessage,
         })
         .select("id")
         .single();
 
       if (!bookErr && bookRecord) {
-        // Insert chunks with vector embeddings in background
-        for (const chunk of allChunks.slice(0, 30)) {
-          const embedding = await generateEmbedding(chunk.text);
-          await supabase.from("book_chunks").insert({
-            book_id: bookRecord.id,
-            page_number: chunk.pageNumber,
-            chapter_title: chunk.chapterTitle,
-            section_title: chunk.sectionTitle,
-            text: chunk.text,
-            key_terms: chunk.keyTerms,
-            embedding: `[${embedding.join(",")}]`,
+        const dbBookId = bookRecord.id;
+        processedBook.id = dbBookId;
+
+        // 4c. Ingest ALL chunks with batch embeddings without arbitrary slice truncation
+        const chunkTexts = allChunks.map((c) => c.text);
+        const embeddings = await generateBatchEmbeddings(chunkTexts, 5);
+
+        const chunkRecords = allChunks.map((chunk, idx) => ({
+          book_id: dbBookId,
+          chunk_index: idx,
+          page_number: chunk.pageNumber,
+          chapter_title: chunk.chapterTitle,
+          section_title: chunk.sectionTitle,
+          text: chunk.text,
+          key_terms: chunk.keyTerms,
+          embedding: `[${(embeddings[idx] || []).join(",")}]`,
+        }));
+
+        // Batch insert in blocks of 50 to avoid Postgres payload limits
+        const BATCH_SIZE = 50;
+        for (let i = 0; i < chunkRecords.length; i += BATCH_SIZE) {
+          const batch = chunkRecords.slice(i, i + BATCH_SIZE);
+          await supabase.from("book_chunks").upsert(batch, {
+            onConflict: "book_id,chunk_index",
           });
         }
       }
@@ -262,5 +323,8 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
     chunksCount: allChunks.length,
     pagesCount: pages.length,
     storagePath,
+    status: processingStatus,
+    statusMessage,
+    isScannedPdf,
   };
 }

@@ -22,7 +22,19 @@ CREATE TABLE IF NOT EXISTS profiles (
 -- ------------------------------------------------------------------------------
 -- BOOKS & DOCUMENTS
 -- ------------------------------------------------------------------------------
-CREATE TYPE document_status AS ENUM ('UPLOADING', 'PROCESSING', 'INDEXING', 'READY', 'FAILED');
+DO $$ BEGIN
+    CREATE TYPE document_status AS ENUM (
+        'UPLOADING',
+        'PROCESSING',
+        'EMBEDDING',
+        'READY',
+        'PARTIALLY_INDEXED',
+        'OCR_REQUIRED',
+        'FAILED'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
 CREATE TABLE IF NOT EXISTS books (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -88,13 +100,15 @@ CREATE TABLE IF NOT EXISTS book_chunks (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     book_id UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
     page_id UUID REFERENCES book_pages(id) ON DELETE CASCADE,
+    chunk_index INT NOT NULL DEFAULT 0,
     page_number INT NOT NULL,
     chapter_title TEXT,
     section_title TEXT,
     text TEXT NOT NULL,
     key_terms TEXT[] DEFAULT '{}',
     embedding vector(768), -- Google Gemini text-embedding-004 dimensions
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT unique_book_chunk UNIQUE(book_id, chunk_index)
 );
 
 -- Create HNSW vector similarity index for fast cosine retrieval
@@ -294,11 +308,12 @@ CREATE OR REPLACE FUNCTION match_book_chunks (
     match_threshold float,
     match_count int,
     filter_book_id uuid,
-    filter_user_id uuid
+    filter_user_id uuid DEFAULT NULL
 )
 RETURNS TABLE (
     id uuid,
     book_id uuid,
+    chunk_index int,
     page_number int,
     chapter_title text,
     section_title text,
@@ -309,11 +324,16 @@ RETURNS TABLE (
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
+DECLARE
+    current_uid uuid;
 BEGIN
+    current_uid := COALESCE(filter_user_id, auth.uid());
+    
     RETURN QUERY
     SELECT
         bc.id,
         bc.book_id,
+        bc.chunk_index,
         bc.page_number,
         bc.chapter_title,
         bc.section_title,
@@ -322,7 +342,7 @@ BEGIN
         1 - (bc.embedding <=> query_embedding) AS similarity
     FROM book_chunks bc
     INNER JOIN books b ON b.id = bc.book_id
-    WHERE b.user_id = filter_user_id
+    WHERE (current_uid IS NULL OR b.user_id = current_uid)
       AND (filter_book_id IS NULL OR bc.book_id = filter_book_id)
       AND (1 - (bc.embedding <=> query_embedding)) >= match_threshold
     ORDER BY bc.embedding <=> query_embedding

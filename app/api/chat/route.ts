@@ -3,8 +3,8 @@ import { LearningMode, Book, VideoLecture } from "@/types";
 import { DEMO_BOOK, DEMO_VIDEO } from "@/lib/demo-data";
 import { retrieveRelevantContext } from "@/lib/rag/retriever";
 import { streamTutorResponse } from "@/lib/gemini/client";
-import { checkRateLimit } from "@/lib/security/rate-limit";
-import { authenticateRequest } from "@/lib/supabase/auth";
+import { checkRateLimit, validateChatInput } from "@/lib/security/rate-limit";
+import { authenticateRequest, verifyBookOwnership, verifyConversationOwnership, isDemoMode } from "@/lib/supabase/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
@@ -22,6 +22,16 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
+
+    // 2. Validate input constraints
+    const validation = validateChatInput(body);
+    if (!validation.isValid) {
+      return NextResponse.json(
+        { error: validation.error || "Invalid request parameters." },
+        { status: 400 }
+      );
+    }
+
     const {
       question,
       pageNumber = 72,
@@ -34,24 +44,46 @@ export async function POST(req: NextRequest) {
       conversationId,
     } = body;
 
-    if (!question || typeof question !== "string" || question.trim().length === 0) {
-      return NextResponse.json(
-        { error: "A valid question string is required." },
-        { status: 400 }
-      );
-    }
-
-    // 2. Authentication check
+    // 3. Authentication & Ownership Verification
     const auth = await authenticateRequest(req);
     const userId = auth?.id;
 
-    // 3. Resolve Target Book Context
+    // If a custom book ID is specified in production, strictly verify ownership
+    if (bookId && !bookId.startsWith("demo-")) {
+      if (!userId) {
+        return NextResponse.json(
+          { error: "Authentication required to access this textbook." },
+          { status: 401 }
+        );
+      }
+
+      const isOwner = await verifyBookOwnership(userId, bookId);
+      if (!isOwner) {
+        return NextResponse.json(
+          { error: "Access denied. You do not have permission to query this textbook." },
+          { status: 403 }
+        );
+      }
+    }
+
+    // If conversation ID is specified, verify ownership
+    if (conversationId && userId) {
+      const isConvOwner = await verifyConversationOwnership(userId, conversationId, bookId);
+      if (!isConvOwner) {
+        return NextResponse.json(
+          { error: "Access denied. You do not have permission to access this conversation." },
+          { status: 403 }
+        );
+      }
+    }
+
+    // 4. Resolve Target Book Context
     let targetBook: Book = DEMO_BOOK;
     if (customBook && customBook.id) {
       targetBook = customBook;
-    } else if (bookId && bookId !== "demo-cn-topdown") {
+    } else if (bookId && !bookId.startsWith("demo-") && userId) {
       const supabase = await createServerSupabaseClient();
-      if (supabase && userId) {
+      if (supabase) {
         const { data: bookRecord } = await supabase
           .from("books")
           .select("*, book_pages(*)")
@@ -86,17 +118,18 @@ export async function POST(req: NextRequest) {
 
     const targetVideo: VideoLecture = activeVideo || DEMO_VIDEO;
 
-    // 4. Hybrid Context Retrieval (pgvector + keyword + page/selection boost)
+    // 5. Fail-Closed Hybrid Context Retrieval
     const ragContext = await retrieveRelevantContext(
       question,
       targetBook,
       pageNumber,
       selectedText,
       targetVideo,
-      videoTimestampSeconds
+      videoTimestampSeconds,
+      userId
     );
 
-    // 5. Streaming Response with SSE
+    // 6. Streaming Response with SSE
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
@@ -111,8 +144,8 @@ export async function POST(req: NextRequest) {
                 controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
               },
               onComplete: async (fullText) => {
-                // Persist conversation & messages if authenticated
-                if (userId && ragContext.activeBook.id) {
+                // Persist conversation & messages if user is authenticated and not demo book
+                if (userId && ragContext.activeBook.id && !ragContext.activeBook.id.startsWith("demo-")) {
                   try {
                     const supabase = await createServerSupabaseClient();
                     if (supabase) {
@@ -122,7 +155,7 @@ export async function POST(req: NextRequest) {
                           .from("conversations")
                           .insert({
                             user_id: userId,
-                            book_id: ragContext.activeBook.id.startsWith("demo-") ? null : ragContext.activeBook.id,
+                            book_id: ragContext.activeBook.id,
                             title: question.slice(0, 60),
                           })
                           .select("id")
@@ -134,24 +167,40 @@ export async function POST(req: NextRequest) {
                         // Insert User message
                         await supabase.from("messages").insert({
                           conversation_id: activeConvId,
-                          user_id: userId,
-                          role: "user",
+                          sender: "user",
                           content: question,
-                          page_number: pageNumber,
-                          selected_text: selectedText || null,
                           learning_mode: learningMode,
+                          context_snapshot: {
+                            pageNumber,
+                            selectedText: selectedText || null,
+                            bookId: ragContext.activeBook.id,
+                          },
                         });
 
-                        // Insert Assistant message with citations
-                        await supabase.from("messages").insert({
-                          conversation_id: activeConvId,
-                          user_id: userId,
-                          role: "assistant",
-                          content: fullText,
-                          page_number: pageNumber,
-                          citations: ragContext.citations,
-                          learning_mode: learningMode,
-                        });
+                        // Insert AI Assistant message with citations
+                        const { data: aiMsg } = await supabase
+                          .from("messages")
+                          .insert({
+                            conversation_id: activeConvId,
+                            sender: "ai",
+                            content: fullText,
+                            learning_mode: learningMode,
+                          })
+                          .select("id")
+                          .single();
+
+                        if (aiMsg && ragContext.citations?.length > 0) {
+                          const citationRecords = ragContext.citations.map((c) => ({
+                            message_id: aiMsg.id,
+                            chunk_id: c.id.startsWith("cite-chunk-") ? c.id.replace("cite-chunk-", "") : null,
+                            book_title: c.bookTitle,
+                            chapter_title: c.chapter,
+                            section_title: c.section,
+                            page_number: c.pageNumber,
+                            excerpt: c.excerpt,
+                          }));
+                          await supabase.from("message_citations").insert(citationRecords);
+                        }
                       }
                     }
                   } catch (dbErr) {
@@ -203,7 +252,7 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error: any) {
-    console.error("Chat API error:", error);
+    console.error("Chat API error:", error?.message || error);
     return NextResponse.json(
       { error: "An unexpected error occurred. Please try again." },
       { status: 500 }

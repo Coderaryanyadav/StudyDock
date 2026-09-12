@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { DEMO_QUIZ_QUESTIONS } from "@/lib/demo-data";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { checkRateLimit } from "@/lib/security/rate-limit";
+import { sanitizePromptText } from "@/lib/security/prompt-guard";
+import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,17 +17,30 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { pageNumber, concept, contextText, bookTitle } = body;
+    const { pageNumber, concept, contextText, bookId } = body;
 
-    // If Gemini API is available and custom contextText is passed, generate dynamic questions
+    // Verify ownership if custom bookId is specified
+    if (bookId && !bookId.startsWith("demo-")) {
+      const auth = await authenticateRequest(req);
+      if (!auth?.id) {
+        return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+      }
+      const isOwner = await verifyBookOwnership(auth.id, bookId);
+      if (!isOwner) {
+        return NextResponse.json({ error: "Access denied." }, { status: 403 });
+      }
+    }
+
+    // Dynamic question generation from actual textbook context
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey && apiKey !== "your_gemini_api_key_here" && contextText && contextText.length > 50) {
       try {
         const genAI = new GoogleGenerativeAI(apiKey);
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-        const prompt = `You are an academic test designer. Generate 3 multiple choice questions based strictly on this textbook context:
-Context: "${contextText.slice(0, 3000)}"
+        const sanitizedContext = sanitizePromptText(contextText, 4000);
+        const prompt = `You are an academic test designer. Generate 3 multiple choice questions based strictly on this verified textbook context:
+Context: "${sanitizedContext}"
 
 Return a JSON array ONLY with this exact structure:
 [
@@ -35,7 +50,7 @@ Return a JSON array ONLY with this exact structure:
     "options": ["Option A", "Option B", "Option C", "Option D"],
     "correctIndex": 0,
     "explanation": "Brief explanation why option 0 is correct based on the text.",
-    "concept": "${concept || "Core Topic"}",
+    "concept": "${sanitizePromptText(concept || "Core Topic", 60)}",
     "pageNumber": ${pageNumber || 1}
   }
 ]`;
@@ -73,7 +88,7 @@ Return a JSON array ONLY with this exact structure:
       generatedFrom: "curated_material",
     });
   } catch (error: any) {
-    console.error("Quiz API error:", error);
+    console.error("Quiz API error:", error?.message || error);
     return NextResponse.json(
       { error: "Failed to generate quiz. Please try again." },
       { status: 500 }

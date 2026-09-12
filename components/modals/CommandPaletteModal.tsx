@@ -7,8 +7,8 @@ import { Book, VideoLecture } from "@/types";
 interface CommandPaletteModalProps {
   isOpen: boolean;
   onClose: () => void;
-  book: Book;
-  video: VideoLecture;
+  book: Book | null;
+  video: VideoLecture | null;
   onNavigateToPage: (page: number) => void;
   onSelectAction: (action: string) => void;
 }
@@ -39,20 +39,25 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
 
   if (!isOpen) return null;
 
-  const filteredPages = query.trim()
-    ? book.pages.filter(
-        (p) =>
-          p.title.toLowerCase().includes(query.toLowerCase()) ||
-          p.content.toLowerCase().includes(query.toLowerCase())
-      )
-    : book.pages.slice(0, 4);
+  const filteredPages = book?.pages
+    ? query.trim()
+      ? book.pages.filter(
+          (p) =>
+            p.title.toLowerCase().includes(query.toLowerCase()) ||
+            p.content.toLowerCase().includes(query.toLowerCase())
+        )
+      : book.pages.slice(0, 4)
+    : [];
 
-  const filteredVideoTopics = query.trim()
-    ? video.topics.filter((t) =>
-        t.title.toLowerCase().includes(query.toLowerCase()) ||
-        t.summary.toLowerCase().includes(query.toLowerCase())
-      )
-    : video.topics.slice(0, 3);
+  const filteredVideoTopics = video?.topics
+    ? query.trim()
+      ? video.topics.filter(
+          (t) =>
+            t.title.toLowerCase().includes(query.toLowerCase()) ||
+            t.summary.toLowerCase().includes(query.toLowerCase())
+        )
+      : video.topics.slice(0, 3)
+    : [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150">

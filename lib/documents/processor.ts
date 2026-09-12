@@ -1,4 +1,3 @@
-const pdfParse = require("pdf-parse");
 import { Book, BookChunk, BookPage, Chapter } from "@/types";
 import { generateBatchEmbeddings } from "@/lib/rag/embeddings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -119,6 +118,7 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
   // 2. Extract text and pages with pdf-parse
   let pdfData: { numpages: number; text: string; info?: any };
   try {
+    const pdfParse = require("pdf-parse");
     pdfData = await pdfParse(fileBuffer, {
       max: 0, // Extract all pages
     });
@@ -228,9 +228,9 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
     startPage: 1,
     endPage: pages.length,
     sections: pages.slice(0, 10).map((p) => ({
-      id: p.sectionId,
-      number: p.sectionTitle.split(" ")[0] || "1.1",
-      title: p.sectionTitle,
+      id: p.sectionId || `sec-${p.pageNumber}`,
+      number: (p.sectionTitle || "1.1").split(" ")[0] || "1.1",
+      title: p.sectionTitle || p.title || `Section ${p.pageNumber}`,
       page: p.pageNumber,
     })),
   });
@@ -289,7 +289,25 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
         const dbBookId = bookRecord.id;
         processedBook.id = dbBookId;
 
-        // 4c. Ingest ALL chunks with batch embeddings without arbitrary slice truncation
+        // 4c. Ingest book_pages records into database
+        const pageRecords = pages.map((p) => ({
+          book_id: dbBookId,
+          page_number: p.pageNumber,
+          title: p.title || `Page ${p.pageNumber}`,
+          content: p.content,
+          key_takeaways: p.keyTakeaways || [],
+          equations: p.equations || [],
+        }));
+
+        const PAGE_BATCH_SIZE = 50;
+        for (let i = 0; i < pageRecords.length; i += PAGE_BATCH_SIZE) {
+          const pageBatch = pageRecords.slice(i, i + PAGE_BATCH_SIZE);
+          await supabase.from("book_pages").upsert(pageBatch, {
+            onConflict: "book_id,page_number",
+          });
+        }
+
+        // 4d. Ingest ALL chunks with batch embeddings without arbitrary slice truncation
         const chunkTexts = allChunks.map((c) => c.text);
         const embeddings = await generateBatchEmbeddings(chunkTexts, 5);
 
@@ -297,10 +315,10 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
           book_id: dbBookId,
           chunk_index: idx,
           page_number: chunk.pageNumber,
-          chapter_title: chunk.chapterTitle,
-          section_title: chunk.sectionTitle,
+          chapter_title: chunk.chapterTitle || null,
+          section_title: chunk.sectionTitle || null,
           text: chunk.text,
-          key_terms: chunk.keyTerms,
+          key_terms: chunk.keyTerms || [],
           embedding: `[${(embeddings[idx] || []).join(",")}]`,
         }));
 

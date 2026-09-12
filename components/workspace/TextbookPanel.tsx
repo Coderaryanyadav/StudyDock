@@ -46,14 +46,28 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
   const [showBookmarks, setShowBookmarks] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isSearching, setIsSearching] = useState<boolean>(false);
-  const [bookmarks, setBookmarks] = useState<number[]>([72]);
+  const [bookmarks, setBookmarks] = useState<number[]>([]);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [selectedHighlightColor, setSelectedHighlightColor] = useState<"yellow" | "green" | "blue" | "pink">("yellow");
   const [selectionToolbarPos, setSelectionToolbarPos] = useState<{ x: number; y: number } | null>(null);
   const [selectedText, setSelectedText] = useState<string>("");
   const [copied, setCopied] = useState<boolean>(false);
 
+  const [showHighlights, setShowHighlights] = useState<boolean>(false);
   const contentRef = useRef<HTMLDivElement>(null);
+
+  // Load persistent annotations for this book
+  useEffect(() => {
+    if (!book?.id) return;
+    fetch(`/api/annotations?bookId=${encodeURIComponent(book.id)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.highlights)) {
+          setHighlights(data.highlights);
+        }
+      })
+      .catch((err) => console.warn("Failed to load annotations:", err));
+  }, [book?.id]);
 
   // Reset scroll position to top when page changes
   useEffect(() => {
@@ -75,10 +89,10 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
     book.pages.find((p) => p.pageNumber === activePageNumber) ||
     book.pages[0] || {
       pageNumber: activePageNumber,
-      chapterId: "ch-3",
-      chapterTitle: "Chapter 3: Transport Layer",
-      sectionId: "sec-3-3",
-      sectionTitle: "3.3 TCP Three-Way Handshake",
+      chapterId: null,
+      chapterTitle: null,
+      sectionId: null,
+      sectionTitle: null,
       title: `Page ${activePageNumber}`,
       content: "Content loading...",
     };
@@ -108,10 +122,48 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
   };
 
   const handleSelectionAction = (
-    action: "explain" | "simplify" | "example" | "ask" | "flashcard" | "quiz",
+    action: "explain" | "simplify" | "example" | "ask" | "flashcard" | "quiz" | "highlight" | "note",
     mode?: LearningMode
   ) => {
     if (!selectedText) return;
+
+    if (action === "highlight") {
+      const tempId = `hl-${Date.now()}`;
+      const newHl: Highlight = {
+        id: tempId,
+        bookId: book.id,
+        pageNumber: activePageNumber,
+        text: selectedText,
+        color: selectedHighlightColor,
+        createdAt: new Date().toISOString(),
+      };
+      setHighlights((prev) => [newHl, ...prev]);
+
+      fetch("/api/annotations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookId: book.id,
+          pageNumber: activePageNumber,
+          text: selectedText,
+          color: selectedHighlightColor,
+        }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.id) {
+            setHighlights((prev) =>
+              prev.map((h) => (h.id === tempId ? { ...h, id: data.id } : h))
+            );
+          }
+        })
+        .catch((err) => console.warn("Failed to persist highlight:", err));
+
+      setSelectionToolbarPos(null);
+      window.getSelection()?.removeAllRanges();
+      return;
+    }
+
     onAskAIWithSelection(selectedText, mode || (action as LearningMode));
     setSelectionToolbarPos(null);
     window.getSelection()?.removeAllRanges();
@@ -164,6 +216,7 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
             onClick={() => {
               setShowBookmarks(!showBookmarks);
               setShowToc(false);
+              setShowHighlights(false);
             }}
             className={`p-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors ${
               showBookmarks
@@ -174,6 +227,23 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
           >
             <Bookmark className="w-4 h-4" />
             <span className="hidden md:inline">({bookmarks.length})</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setShowHighlights(!showHighlights);
+              setShowToc(false);
+              setShowBookmarks(false);
+            }}
+            className={`p-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors ${
+              showHighlights
+                ? "bg-yellow-500/20 text-yellow-300 border border-yellow-500/40"
+                : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"
+            }`}
+            title="Highlights & Notes"
+          >
+            <Highlighter className="w-4 h-4 text-yellow-400" />
+            <span className="hidden md:inline">({highlights.length})</span>
           </button>
         </div>
 
@@ -397,6 +467,58 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
           </div>
         )}
 
+        {/* Highlights Drawer */}
+        {showHighlights && (
+          <div className="w-64 bg-slate-900 border-r border-slate-800 h-full overflow-y-auto p-3 text-xs z-10 flex flex-col shrink-0 animate-in slide-in-from-left duration-150">
+            <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-800">
+              <span className="font-semibold text-yellow-400 flex items-center gap-1.5">
+                <Highlighter className="w-4 h-4" /> Highlights & Notes
+              </span>
+              <button
+                onClick={() => setShowHighlights(false)}
+                className="text-slate-400 hover:text-slate-200 p-0.5 rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-2">
+              {highlights.length === 0 ? (
+                <div className="text-slate-500 italic py-2">
+                  No highlights yet. Select text in the reader and click &ldquo;Highlight&rdquo;.
+                </div>
+              ) : (
+                highlights.map((hl) => (
+                  <div
+                    key={hl.id}
+                    onClick={() => {
+                      onPageChange(hl.pageNumber);
+                      setShowHighlights(false);
+                    }}
+                    className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 hover:border-yellow-500/50 cursor-pointer transition-all space-y-1.5 group"
+                  >
+                    <div className="flex items-center justify-between text-[10px] text-slate-400">
+                      <span className="font-mono text-yellow-400 font-semibold">
+                        Page {hl.pageNumber}
+                      </span>
+                      <span className="opacity-0 group-hover:opacity-100 text-yellow-400">
+                        Jump →
+                      </span>
+                    </div>
+                    <p className="text-slate-200 text-[11px] line-clamp-3 italic border-l-2 border-yellow-400/80 pl-2">
+                      &ldquo;{hl.text}&rdquo;
+                    </p>
+                    {hl.note && (
+                      <p className="text-slate-400 text-[10px] bg-slate-900 p-1.5 rounded">
+                        Note: {hl.note}
+                      </p>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Digital Textbook Reading Canvas */}
         <div
           ref={contentRef}
@@ -452,8 +574,8 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
 
             {/* Footer */}
             <div className="mt-8 pt-4 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-500">
-              <span>{book.title} ({book.edition})</span>
-              <span>Kurose & Ross</span>
+              <span>{book.title} ({book.edition || "Academic Edition"})</span>
+              <span>{book.author || "Academic Textbook"}</span>
             </div>
           </div>
         </div>

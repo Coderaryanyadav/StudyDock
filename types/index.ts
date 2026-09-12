@@ -22,10 +22,10 @@ export interface LearningModeConfig {
 export interface BookChunk {
   id: string;
   bookId: string;
-  chapterId: string;
-  chapterTitle: string;
-  sectionId: string;
-  sectionTitle: string;
+  chapterId?: string | null;
+  chapterTitle?: string | null;
+  sectionId?: string | null;
+  sectionTitle?: string | null;
   pageNumber: number;
   text: string;
   keyTerms?: string[];
@@ -33,10 +33,10 @@ export interface BookChunk {
 
 export interface BookPage {
   pageNumber: number;
-  chapterId: string;
-  chapterTitle: string;
-  sectionId: string;
-  sectionTitle: string;
+  chapterId?: string | null;
+  chapterTitle?: string | null;
+  sectionId?: string | null;
+  sectionTitle?: string | null;
   title: string;
   content: string; // Markdown or rich HTML content
   diagramSvg?: string;
@@ -102,11 +102,11 @@ export interface VideoLecture {
   id: string;
   title: string;
   youtubeId: string;
-  channelName: string;
+  channelName?: string | null;
   durationSeconds: number;
   formattedDuration: string;
-  bookId: string;
-  topics: VideoTopic[];
+  bookId?: string;
+  topics?: VideoTopic[];
 }
 
 export interface Citation {

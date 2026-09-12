@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: true, highlights: [], notes: [] });
     }
 
-    const supabase = createServerSupabaseClient() || createAdminClient();
+    const supabase = await createServerSupabaseClient() || createAdminClient();
     if (!supabase) {
       return NextResponse.json({ success: true, highlights: [], notes: [] });
     }
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing required annotation fields." }, { status: 400 });
     }
 
-    const supabase = createServerSupabaseClient() || createAdminClient();
+    const supabase = await createServerSupabaseClient() || createAdminClient();
     if (!supabase) {
       return NextResponse.json({ error: "Database client unavailable." }, { status: 500 });
     }
@@ -101,7 +101,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "Annotation ID is required." }, { status: 400 });
     }
 
-    const supabase = createServerSupabaseClient() || createAdminClient();
+    const supabase = await createServerSupabaseClient() || createAdminClient();
     if (supabase) {
       await supabase
         .from("highlights")

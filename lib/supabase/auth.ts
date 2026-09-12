@@ -22,7 +22,7 @@ export function isDemoMode(): boolean {
  * Strictly returns null for unauthenticated users in production.
  */
 export async function authenticateRequest(req?: NextRequest): Promise<AuthSessionUser | null> {
-  const supabase = createServerSupabaseClient();
+  const supabase = await createServerSupabaseClient();
 
   if (!supabase) {
     if (isDemoMode()) {
@@ -82,7 +82,7 @@ export async function verifyBookOwnership(userId: string, bookId: string): Promi
     return false;
   }
 
-  const supabase = createServerSupabaseClient() || createAdminClient();
+  const supabase = await createServerSupabaseClient() || createAdminClient();
   if (!supabase) return false;
 
   try {
@@ -113,7 +113,7 @@ export async function verifyConversationOwnership(
 ): Promise<boolean> {
   if (!conversationId || !userId || userId === "guest-user") return false;
 
-  const supabase = createServerSupabaseClient() || createAdminClient();
+  const supabase = await createServerSupabaseClient() || createAdminClient();
   if (!supabase) return false;
 
   try {

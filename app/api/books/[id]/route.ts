@@ -1,26 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, verifyBookOwnership, isDemoMode } from "@/lib/supabase/auth";
+import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { DEMO_BOOK } from "@/lib/demo-data";
 import { Book, BookPage, Chapter } from "@/types";
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const bookId = params.id;
+    const resolvedParams = await params;
+    const bookId = resolvedParams.id;
 
     if (!bookId) {
       return NextResponse.json({ error: "Book ID is required." }, { status: 400 });
-    }
-
-    if (bookId.startsWith("demo-") || bookId === DEMO_BOOK.id) {
-      return NextResponse.json({
-        success: true,
-        book: DEMO_BOOK,
-      });
     }
 
     const auth = await authenticateRequest(req);
@@ -41,7 +34,7 @@ export async function GET(
       );
     }
 
-    const supabase = createServerSupabaseClient() || createAdminClient();
+    const supabase = await createServerSupabaseClient() || createAdminClient();
     if (!supabase) {
       return NextResponse.json({ error: "Database client unavailable." }, { status: 500 });
     }
@@ -74,11 +67,11 @@ export async function GET(
 
     const pages: BookPage[] = (pagesData || []).map((p) => ({
       pageNumber: p.page_number,
-      chapterId: p.chapter_id || "ch-1",
-      chapterTitle: p.title || "Chapter",
-      sectionId: p.section_id || "sec-1",
-      sectionTitle: p.title || "Section",
-      title: p.title,
+      chapterId: p.chapter_id || null,
+      chapterTitle: p.chapter_title || null,
+      sectionId: p.section_id || null,
+      sectionTitle: p.section_title || null,
+      title: p.title || `Page ${p.page_number}`,
       content: p.content,
       keyTakeaways: p.key_takeaways || [],
       equations: p.equations || [],
@@ -129,10 +122,11 @@ export async function GET(
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const bookId = params.id;
+    const resolvedParams = await params;
+    const bookId = resolvedParams.id;
     const auth = await authenticateRequest(req);
     const userId = auth?.id;
 
@@ -148,7 +142,7 @@ export async function PATCH(
     const body = await req.json();
     const { lastPageRead, title } = body;
 
-    const supabase = createServerSupabaseClient() || createAdminClient();
+    const supabase = await createServerSupabaseClient() || createAdminClient();
     if (!supabase) {
       return NextResponse.json({ error: "Database client unavailable." }, { status: 500 });
     }
@@ -179,10 +173,11 @@ export async function PATCH(
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const bookId = params.id;
+    const resolvedParams = await params;
+    const bookId = resolvedParams.id;
     const auth = await authenticateRequest(req);
     const userId = auth?.id;
 
@@ -195,7 +190,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Access denied." }, { status: 403 });
     }
 
-    const supabase = createServerSupabaseClient() || createAdminClient();
+    const supabase = await createServerSupabaseClient() || createAdminClient();
     if (!supabase) {
       return NextResponse.json({ error: "Database client unavailable." }, { status: 500 });
     }

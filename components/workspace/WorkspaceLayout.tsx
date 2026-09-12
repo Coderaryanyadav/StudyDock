@@ -12,7 +12,7 @@ interface WorkspaceLayoutProps {
   book: Book;
   activePageNumber: number;
   onPageChange: (page: number) => void;
-  video: VideoLecture;
+  video: VideoLecture | null;
   onUpdateVideo: (video: VideoLecture) => void;
   targetCitationPage?: number | null;
   onClearTargetCitation?: () => void;
@@ -255,6 +255,7 @@ export const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({
           >
             <VideoPanel
               video={video}
+              bookId={book.id}
               activePageNumber={activePageNumber}
               onNavigateToTextbookPage={(p) => {
                 onPageChange(p);

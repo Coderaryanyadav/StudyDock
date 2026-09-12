@@ -102,11 +102,11 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
 
           <div className="flex items-center gap-3">
             <button
-              onClick={() => onContinueStudying(activeBook ? activeBook.lastPageRead : 72)}
+              onClick={() => onContinueStudying(activeBook ? (activeBook.lastPageRead || 1) : 1)}
               className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2"
             >
               <BookOpen className="w-4 h-4" />
-              <span>Continue Studying (p.{activeBook ? activeBook.lastPageRead : 72})</span>
+              <span>Continue Studying (p.{activeBook ? (activeBook.lastPageRead || 1) : 1})</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
@@ -199,30 +199,30 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
                 <h3 className="font-bold text-base text-white">Active Textbook Module</h3>
               </div>
               <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
-                {activeBook ? `Page ${activeBook.lastPageRead || 1} / ${activeBook.totalPages}` : "72% Completed"}
+                {activeBook ? `Page ${activeBook.lastPageRead || 1} / ${activeBook.totalPages}` : "No Active Textbook"}
               </span>
             </div>
 
             <div className="flex flex-col sm:flex-row gap-5 items-start">
               <div className="w-full sm:w-44 h-32 rounded-xl bg-gradient-to-br from-indigo-900 via-slate-900 to-purple-950 border border-slate-700 flex flex-col justify-end p-3 relative overflow-hidden shadow-inner">
                 <div className="absolute top-2 right-2 text-[10px] font-mono text-indigo-300/80 bg-indigo-950/60 px-1.5 py-0.5 rounded border border-indigo-800/60">
-                  {activeBook ? activeBook.edition || "PDF" : "8th Ed."}
+                  {activeBook ? activeBook.edition || "PDF" : "Library"}
                 </div>
                 <div className="text-xs font-bold text-white leading-tight line-clamp-2">
-                  {activeBook ? activeBook.title : "Computer Networking: Principles & Protocols"}
+                  {activeBook ? activeBook.title : "No textbook currently selected"}
                 </div>
                 <div className="text-[10px] text-slate-400 mt-1">
-                  {activeBook ? activeBook.author || "Imported Textbook" : "Kurose & Ross"}
+                  {activeBook ? activeBook.author || "Imported Textbook" : "Upload to get started"}
                 </div>
               </div>
 
               <div className="flex-1 space-y-3">
                 <div>
                   <h4 className="font-semibold text-sm text-slate-100">
-                    {activeBook ? activeBook.title : "Chapter 3: Transport Layer"}
+                    {activeBook ? activeBook.title : "Select or Upload a Textbook"}
                   </h4>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Currently on Page {activeBook ? activeBook.lastPageRead : 72}
+                    {activeBook ? `Currently on Page ${activeBook.lastPageRead || 1}` : "Ready to study"}
                   </p>
                 </div>
 
@@ -231,13 +231,13 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
                   <div className="flex items-center justify-between text-xs font-mono text-slate-400">
                     <span>Reading Progress</span>
                     <span className="text-indigo-400 font-semibold">
-                      {activeBook ? `${activeBook.lastPageRead} / ${activeBook.totalPages} pages` : "5 / 7 sections"}
+                      {activeBook ? `${activeBook.lastPageRead || 1} / ${activeBook.totalPages} pages` : "0 / 0 pages"}
                     </span>
                   </div>
                   <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
                     <div
                       style={{
-                        width: activeBook ? `${Math.min(100, Math.round((activeBook.lastPageRead / activeBook.totalPages) * 100))}%` : "72%",
+                        width: activeBook && activeBook.totalPages ? `${Math.min(100, Math.round(((activeBook.lastPageRead || 1) / activeBook.totalPages) * 100))}%` : "0%",
                       }}
                       className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-500"
                     />
@@ -247,10 +247,10 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
                 {/* Quick actions */}
                 <div className="flex flex-wrap items-center gap-2 pt-2">
                   <button
-                    onClick={() => onContinueStudying(activeBook ? activeBook.lastPageRead : 72)}
+                    onClick={() => onContinueStudying(activeBook ? (activeBook.lastPageRead || 1) : 1)}
                     className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs transition-colors flex items-center gap-1.5 shadow-md"
                   >
-                    <span>Resume Reading (p.{activeBook ? activeBook.lastPageRead : 72})</span>
+                    <span>Resume Reading (p.{activeBook ? (activeBook.lastPageRead || 1) : 1})</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
 

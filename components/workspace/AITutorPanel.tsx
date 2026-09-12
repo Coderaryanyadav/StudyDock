@@ -27,7 +27,7 @@ import { renderMathInText } from "@/lib/katex-renderer";
 interface AITutorPanelProps {
   book: Book;
   activePageNumber: number;
-  activeVideo: VideoLecture;
+  activeVideo: VideoLecture | null;
   onNavigateToTextbookPage: (page: number) => void;
   externalPrompt?: { text: string; mode?: LearningMode; selectedText?: string } | null;
   onClearExternalPrompt?: () => void;
@@ -51,7 +51,7 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
       id: "msg-welcome",
       sender: "ai",
       content: `Hello! I'm your **AI Academic Tutor** for *${book.title}*.\n\nI'm currently tracking your progress on **Page ${activePageNumber}** (*${
-        book.pages.find((p) => p.pageNumber === activePageNumber)?.sectionTitle || "Current Page"
+        book.pages.find((p) => p.pageNumber === activePageNumber)?.sectionTitle || book.pages.find((p) => p.pageNumber === activePageNumber)?.title || `Page ${activePageNumber}`
       }*).\n\nAsk me anything about the textbook, attached lectures, or select text in the reader to get deep-dive explanations!`,
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       suggestedFollowUps: [
@@ -114,8 +114,8 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
       learningMode: currentMode,
       contextSnapshot: {
         bookTitle: book.title,
-        chapterTitle: activePageObj?.chapterTitle || "Chapter 3: Transport Layer",
-        sectionTitle: activePageObj?.sectionTitle || "3.3 Handshake",
+        chapterTitle: activePageObj?.chapterTitle || "",
+        sectionTitle: activePageObj?.sectionTitle || activePageObj?.title || `Page ${activePageNumber}`,
         pageNumber: activePageNumber,
         selectedText: selectedTextContext,
       },
@@ -143,9 +143,7 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
           pageNumber: activePageNumber,
           selectedText: selectedTextContext,
           learningMode: currentMode,
-          videoTimestampSeconds: 240,
           bookId: book.id,
-          customBook: book,
         }),
       });
 
@@ -251,7 +249,7 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
             <div className="text-[10px] text-slate-400 flex items-center gap-1">
               <span>Grounded on:</span>
               <span className="text-slate-300 font-medium truncate max-w-[180px]">
-                p.{activePageNumber} ({book.pages.find((p) => p.pageNumber === activePageNumber)?.sectionTitle || "Transport Layer"})
+                p.{activePageNumber} ({book.pages.find((p) => p.pageNumber === activePageNumber)?.sectionTitle || book.pages.find((p) => p.pageNumber === activePageNumber)?.title || `Page ${activePageNumber}`})
               </span>
             </div>
           </div>

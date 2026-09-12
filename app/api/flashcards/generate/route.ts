@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { DEMO_FLASHCARDS } from "@/lib/demo-data";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { checkRateLimit } from "@/lib/security/rate-limit";
 import { sanitizePromptText } from "@/lib/security/prompt-guard";
@@ -67,24 +66,18 @@ Return a JSON array ONLY with this exact structure:
           });
         }
       } catch (geminiErr) {
-        console.warn("Dynamic flashcard generation fallback:", geminiErr);
+        console.warn("Flashcard generation error:", geminiErr);
+        return NextResponse.json(
+          { error: "Failed to generate flashcards from textbook context." },
+          { status: 500 }
+        );
       }
+    } else {
+      return NextResponse.json(
+        { error: "Invalid context or AI configuration missing." },
+        { status: 400 }
+      );
     }
-
-    let flashcards = DEMO_FLASHCARDS;
-    if (pageNumber) {
-      const filtered = DEMO_FLASHCARDS.filter((f) => f.pageNumber === pageNumber);
-      if (filtered.length > 0) {
-        flashcards = filtered;
-      }
-    }
-
-    return NextResponse.json({
-      success: true,
-      flashcards,
-      count: flashcards.length,
-      generatedFrom: "curated_material",
-    });
   } catch (error: any) {
     console.error("Flashcards API error:", error?.message || error);
     return NextResponse.json(

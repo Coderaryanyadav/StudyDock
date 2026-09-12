@@ -7,7 +7,7 @@ import { LearningMode } from "@/types";
 interface TextbookSelectionToolbarProps {
   position: { x: number; y: number } | null;
   selectedText: string;
-  onAction: (action: "explain" | "simplify" | "example" | "ask" | "flashcard" | "quiz", mode?: LearningMode) => void;
+  onAction: (action: "explain" | "simplify" | "example" | "ask" | "flashcard" | "quiz" | "highlight" | "note", mode?: LearningMode) => void;
   onClose: () => void;
 }
 
@@ -82,6 +82,17 @@ export const TextbookSelectionToolbar: React.FC<TextbookSelectionToolbarProps> =
       >
         <HelpCircle className="w-3.5 h-3.5 text-rose-400" />
         <span className="hidden sm:inline">Quiz</span>
+      </button>
+
+      <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
+
+      <button
+        onClick={() => onAction("highlight")}
+        className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-amber-500/20 text-amber-300 transition-colors"
+        title="Highlight selection and save"
+      >
+        <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" />
+        <span className="hidden sm:inline">Highlight</span>
       </button>
     </div>
   );

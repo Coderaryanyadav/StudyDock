@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { LearningMode, Book, VideoLecture } from "@/types";
-import { DEMO_BOOK, DEMO_VIDEO } from "@/lib/demo-data";
 import { retrieveRelevantContext } from "@/lib/rag/retriever";
 import { streamTutorResponse } from "@/lib/gemini/client";
 import { checkRateLimit, validateChatInput } from "@/lib/security/rate-limit";
-import { authenticateRequest, verifyBookOwnership, verifyConversationOwnership, isDemoMode } from "@/lib/supabase/auth";
+import { authenticateRequest, verifyBookOwnership, verifyConversationOwnership } from "@/lib/supabase/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
@@ -34,13 +34,11 @@ export async function POST(req: NextRequest) {
 
     const {
       question,
-      pageNumber = 72,
+      pageNumber = 1,
       selectedText,
       learningMode = "explain",
       videoTimestampSeconds,
       bookId,
-      customBook,
-      activeVideo,
       conversationId,
     } = body;
 
@@ -48,26 +46,31 @@ export async function POST(req: NextRequest) {
     const auth = await authenticateRequest(req);
     const userId = auth?.id;
 
-    // If a custom book ID is specified in production, strictly verify ownership
-    if (bookId && !bookId.startsWith("demo-")) {
-      if (!userId) {
-        return NextResponse.json(
-          { error: "Authentication required to access this textbook." },
-          { status: 401 }
-        );
-      }
+    if (!userId) {
+      return NextResponse.json(
+        { error: "Authentication required to query the AI Tutor." },
+        { status: 401 }
+      );
+    }
 
-      const isOwner = await verifyBookOwnership(userId, bookId);
-      if (!isOwner) {
-        return NextResponse.json(
-          { error: "Access denied. You do not have permission to query this textbook." },
-          { status: 403 }
-        );
-      }
+    if (!bookId) {
+      return NextResponse.json(
+        { error: "Book ID is required." },
+        { status: 400 }
+      );
+    }
+
+    // Verify ownership of the book
+    const isOwner = await verifyBookOwnership(userId, bookId);
+    if (!isOwner) {
+      return NextResponse.json(
+        { error: "Access denied. You do not have permission to query this textbook." },
+        { status: 403 }
+      );
     }
 
     // If conversation ID is specified, verify ownership
-    if (conversationId && userId) {
+    if (conversationId) {
       const isConvOwner = await verifyConversationOwnership(userId, conversationId, bookId);
       if (!isConvOwner) {
         return NextResponse.json(
@@ -77,46 +80,72 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4. Resolve Target Book Context
-    let targetBook: Book = DEMO_BOOK;
-    if (customBook && customBook.id) {
-      targetBook = customBook;
-    } else if (bookId && !bookId.startsWith("demo-") && userId) {
-      const supabase = await createServerSupabaseClient();
-      if (supabase) {
-        const { data: bookRecord } = await supabase
-          .from("books")
-          .select("*, book_pages(*)")
-          .eq("id", bookId)
-          .eq("user_id", userId)
-          .single();
+    // 4. Resolve Target Book Context Authoritatively from Database
+    let targetBook: Book | null = null;
+    let targetVideo: VideoLecture | undefined = undefined;
 
-        if (bookRecord) {
-          targetBook = {
-            id: bookRecord.id,
-            title: bookRecord.title,
-            author: bookRecord.author,
-            edition: bookRecord.edition,
-            subject: bookRecord.subject,
-            totalPages: bookRecord.total_pages,
-            chapters: [],
-            pages: (bookRecord.book_pages || []).map((p: any) => ({
-              pageNumber: p.page_number,
-              chapterId: p.chapter_id || "ch-1",
-              chapterTitle: p.chapter_title || "Chapter",
-              sectionId: p.section_id || "sec-1",
-              sectionTitle: p.section_title || "Section",
-              title: p.title || `Page ${p.page_number}`,
-              content: p.content || "",
-              keyTakeaways: p.key_takeaways || [],
-            })),
-            chunks: [],
+    const supabase = await createServerSupabaseClient() || createAdminClient();
+    if (supabase) {
+      const { data: bookRecord, error: bookErr } = await supabase
+        .from("books")
+        .select("*, book_pages(*)")
+        .eq("id", bookId)
+        .eq("user_id", userId)
+        .single();
+
+      if (bookErr || !bookRecord) {
+        return NextResponse.json(
+          { error: "Target book could not be found or you do not have permission to access it." },
+          { status: 404 }
+        );
+      }
+
+      targetBook = {
+        id: bookRecord.id,
+        title: bookRecord.title,
+        author: bookRecord.author,
+        edition: bookRecord.edition,
+        subject: bookRecord.subject,
+        totalPages: bookRecord.total_pages || (bookRecord.book_pages || []).length,
+        chapters: [],
+        pages: (bookRecord.book_pages || []).map((p: any) => ({
+          pageNumber: p.page_number,
+          chapterId: p.chapter_id || null,
+          chapterTitle: p.chapter_title || null,
+          sectionId: p.section_id || null,
+          sectionTitle: p.section_title || null,
+          title: p.title || `Page ${p.page_number}`,
+          content: p.content || "",
+          keyTakeaways: p.key_takeaways || [],
+        })),
+        chunks: [],
+      };
+
+      if (bookRecord.youtube_url) {
+        const match = bookRecord.youtube_url.match(
+          /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/
+        );
+        if (match) {
+          targetVideo = {
+            id: `vid-${match[1]}`,
+            youtubeId: match[1],
+            title: bookRecord.video_title || `Lecture (${match[1]})`,
+            channelName: bookRecord.video_channel || null,
+            durationSeconds: 0,
+            formattedDuration: "00:00",
+            bookId: bookRecord.id,
+            topics: [],
           };
         }
       }
     }
 
-    const targetVideo: VideoLecture = activeVideo || DEMO_VIDEO;
+    if (!targetBook) {
+      return NextResponse.json(
+        { error: "Target book could not be found or database is unavailable." },
+        { status: 404 }
+      );
+    }
 
     // 5. Fail-Closed Hybrid Context Retrieval
     const ragContext = await retrieveRelevantContext(

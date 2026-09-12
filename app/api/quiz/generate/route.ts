@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { DEMO_QUIZ_QUESTIONS } from "@/lib/demo-data";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { checkRateLimit } from "@/lib/security/rate-limit";
 import { sanitizePromptText } from "@/lib/security/prompt-guard";
@@ -68,25 +67,18 @@ Return a JSON array ONLY with this exact structure:
           });
         }
       } catch (geminiErr) {
-        console.warn("Dynamic quiz generation fallback:", geminiErr);
+        console.warn("Quiz generation error:", geminiErr);
+        return NextResponse.json(
+          { error: "Failed to generate quiz from textbook context." },
+          { status: 500 }
+        );
       }
+    } else {
+      return NextResponse.json(
+        { error: "Invalid context or AI configuration missing." },
+        { status: 400 }
+      );
     }
-
-    // Default grounded questions filtered by page/concept
-    let questions = DEMO_QUIZ_QUESTIONS;
-    if (pageNumber) {
-      const pageMatch = DEMO_QUIZ_QUESTIONS.filter((q) => q.pageNumber === pageNumber);
-      if (pageMatch.length > 0) {
-        questions = pageMatch;
-      }
-    }
-
-    return NextResponse.json({
-      success: true,
-      questions,
-      count: questions.length,
-      generatedFrom: "curated_material",
-    });
   } catch (error: any) {
     console.error("Quiz API error:", error?.message || error);
     return NextResponse.json(

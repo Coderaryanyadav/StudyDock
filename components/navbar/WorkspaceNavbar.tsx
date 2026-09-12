@@ -21,7 +21,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 interface WorkspaceNavbarProps {
   currentView: "workspace" | "dashboard" | "landing";
   onViewChange: (view: "workspace" | "dashboard" | "landing") => void;
-  activeBook: Book;
+  activeBook: Book | null;
   activePageNumber: number;
   onOpenLibraryModal: () => void;
   onOpenUploadModal: () => void;
@@ -48,7 +48,7 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
   onResetDemo,
 }) => {
   const [userEmail, setUserEmail] = useState<string | null>(null);
-  const activePageObj = activeBook.pages.find((p) => p.pageNumber === activePageNumber);
+  const activePageObj = activeBook?.pages?.find((p) => p.pageNumber === activePageNumber);
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
@@ -99,14 +99,14 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
         </button>
 
         {/* Workspace Active Chapter Breadcrumb */}
-        {currentView === "workspace" && (
+        {currentView === "workspace" && activeBook && (
           <div className="hidden lg:flex items-center gap-1.5 pl-3 border-l border-slate-800 text-xs text-slate-400">
             <span className="text-slate-300 font-medium truncate max-w-[140px]">
               {activeBook.title}
             </span>
             <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
             <span className="text-slate-300 truncate max-w-[140px]">
-              {activePageObj?.sectionTitle || "Transport Layer"}
+              {activePageObj?.sectionTitle || activePageObj?.title || `Page ${activePageNumber}`}
             </span>
             <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
             <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 text-[10px] font-mono">

@@ -5,10 +5,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const bookId = params.id;
+    const resolvedParams = await params;
+    const bookId = resolvedParams.id;
     const auth = await authenticateRequest(req);
     const userId = auth?.id;
 
@@ -40,7 +41,7 @@ export async function POST(
       return NextResponse.json({ error: "Invalid YouTube URL format." }, { status: 400 });
     }
 
-    const supabase = createServerSupabaseClient() || createAdminClient();
+    const supabase = await createServerSupabaseClient() || createAdminClient();
     if (supabase && !bookId.startsWith("demo-")) {
       // Update book with connected lecture
       await supabase
@@ -58,11 +59,16 @@ export async function POST(
         user_id: userId,
         book_id: bookId,
         youtube_id: youtubeId,
-        title: title || `Lecture for Book`,
-        channel_name: channelName || "Academic Lecture",
+        title: title || `Lecture (${youtubeId})`,
+        channel_name: channelName || null,
         duration_seconds: durationSeconds || 0,
       });
     }
+
+    const durSec = typeof durationSeconds === "number" ? durationSeconds : 0;
+    const formattedDuration = durSec > 0 
+      ? `${Math.floor(durSec / 60)}:${(durSec % 60).toString().padStart(2, "0")}`
+      : "00:00";
 
     return NextResponse.json({
       success: true,
@@ -70,9 +76,10 @@ export async function POST(
         id: `vid-${youtubeId}`,
         youtubeId,
         title: title || `YouTube Lecture (${youtubeId})`,
-        channelName: channelName || "Academic Lecture",
-        durationSeconds: durationSeconds || 3600,
-        formattedDuration: "60:00",
+        channelName: channelName || null,
+        durationSeconds: durSec,
+        formattedDuration,
+        bookId,
         topics: [],
       },
     });

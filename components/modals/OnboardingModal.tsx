@@ -137,7 +137,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 onClick={() => setStep(3)}
                 className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30"
               >
-                <span>Next: Demo Ready</span>
+                <span>Next: Complete Setup</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -153,7 +153,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             <div>
               <h3 className="text-xl font-bold text-white">Your Workspace is Ready!</h3>
               <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                We have loaded the sample textbook <strong>Computer Networking (Chapter 3: Transport Layer)</strong> with pre-indexed citations and linked video lectures.
+                Your learning workspace is active. Upload your textbook or course materials to start reading with AI citations and synchronized video lectures.
               </p>
             </div>
 

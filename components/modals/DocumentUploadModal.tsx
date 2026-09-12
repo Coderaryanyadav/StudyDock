@@ -16,9 +16,9 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   onDocumentUploaded,
 }) => {
   const [file, setFile] = useState<File | null>(null);
-  const [title, setTitle] = useState<string>("Operating Systems: Three Easy Pieces");
-  const [author, setAuthor] = useState<string>("Remzi & Andrea Arpaci-Dusseau");
-  const [subject, setSubject] = useState<string>("Computer Systems");
+  const [title, setTitle] = useState<string>("");
+  const [author, setAuthor] = useState<string>("");
+  const [subject, setSubject] = useState<string>("");
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [processStep, setProcessStep] = useState<"idle" | "uploading" | "extracting" | "indexing" | "ready">("idle");
   const [error, setError] = useState<string>("");

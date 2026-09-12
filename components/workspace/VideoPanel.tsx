@@ -21,7 +21,8 @@ import { VideoLecture, VideoTopic } from "@/types";
 import { ConnectLectureModal } from "./ConnectLectureModal";
 
 interface VideoPanelProps {
-  video: VideoLecture;
+  video: VideoLecture | null;
+  bookId?: string;
   activePageNumber: number;
   onNavigateToTextbookPage: (page: number) => void;
   onAskAIAboutVideo: (topic: VideoTopic) => void;
@@ -32,6 +33,7 @@ interface VideoPanelProps {
 
 export const VideoPanel: React.FC<VideoPanelProps> = ({
   video,
+  bookId,
   activePageNumber,
   onNavigateToTextbookPage,
   onAskAIAboutVideo,
@@ -39,62 +41,64 @@ export const VideoPanel: React.FC<VideoPanelProps> = ({
   isCollapsed = false,
   onToggleCollapse,
 }) => {
-  const [activeTopicIndex, setActiveTopicIndex] = useState<number>(2); // Default to TCP Handshake topic
+  const [activeTopicIndex, setActiveTopicIndex] = useState<number>(0);
   const [isConnectModalOpen, setIsConnectModalOpen] = useState<boolean>(false);
-  const [currentTimestamp, setCurrentTimestamp] = useState<number>(240); // 04:00
+  const [currentTimestamp, setCurrentTimestamp] = useState<number>(0);
   const [showAllTopics, setShowAllTopics] = useState<boolean>(false);
-  const [useDirectPlayer, setUseDirectPlayer] = useState<boolean>(true);
 
-  const activeTopic = video.topics[activeTopicIndex] || video.topics[0];
+  const activeTopic = video?.topics && video.topics.length > 0
+    ? video.topics[activeTopicIndex] || video.topics[0]
+    : null;
 
   const handleTopicClick = (index: number) => {
     setActiveTopicIndex(index);
-    const topic = video.topics[index];
-    if (topic) {
-      setCurrentTimestamp(topic.timestampSeconds);
+    if (video?.topics && video.topics[index]) {
+      setCurrentTimestamp(video.topics[index].timestampSeconds);
     }
   };
 
-  const handleConnectLecture = (url: string, customTitle: string) => {
+  const handleConnectLecture = async (url: string, customTitle: string) => {
     const match = url.match(
       /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/
     );
-    const videoId = match ? match[1] : "7_LPdttKXPc";
+    if (!match) {
+      alert("Please provide a valid 11-character YouTube video URL.");
+      return;
+    }
+    const videoId = match[1];
 
-    const updatedVideo: VideoLecture = {
-      ...video,
-      id: `vid-${Date.now()}`,
-      title: customTitle,
+    if (bookId) {
+      try {
+        const res = await fetch(`/api/books/${bookId}/video`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            youtubeUrl: url,
+            title: customTitle || `YouTube Lecture (${videoId})`,
+          }),
+        });
+        const data = await res.json();
+        if (res.ok && data.video) {
+          onUpdateVideo(data.video);
+          return;
+        }
+      } catch (err) {
+        console.warn("Failed to persist video on server:", err);
+      }
+    }
+
+    const newVideo: VideoLecture = {
+      id: `vid-${videoId}`,
+      title: customTitle || `YouTube Lecture (${videoId})`,
       youtubeId: videoId,
-      topics: [
-        {
-          timestampSeconds: 0,
-          formattedTime: "00:00",
-          title: "Lecture Intro & Foundations",
-          chapterId: "ch-3",
-          pageNumber: 70,
-          summary: "Lecture overview and core concepts.",
-        },
-        {
-          timestampSeconds: 180,
-          formattedTime: "03:00",
-          title: "TCP 3-Way Handshake Deep Dive",
-          chapterId: "ch-3",
-          pageNumber: 72,
-          summary: "SYN, SYN-ACK, ACK packet traces.",
-        },
-        {
-          timestampSeconds: 420,
-          formattedTime: "07:00",
-          title: "Flow Control & Buffer Management",
-          chapterId: "ch-3",
-          pageNumber: 73,
-          summary: "Receiver window (rwnd) mechanics.",
-        },
-      ],
+      channelName: null,
+      durationSeconds: 0,
+      formattedDuration: "00:00",
+      bookId: bookId || "",
+      topics: [],
     };
 
-    onUpdateVideo(updatedVideo);
+    onUpdateVideo(newVideo);
   };
 
   if (isCollapsed) {
@@ -105,7 +109,7 @@ export const VideoPanel: React.FC<VideoPanelProps> = ({
             <Youtube className="w-3.5 h-3.5" />
           </div>
           <span className="font-medium text-slate-300 truncate max-w-xs">
-            🎥 Video: {video.title} ({activeTopic.formattedTime})
+            🎥 Video: {video ? video.title : "No lecture attached"}
           </span>
         </div>
         <button
@@ -115,6 +119,36 @@ export const VideoPanel: React.FC<VideoPanelProps> = ({
           <span>Expand Video</span>
           <ChevronDown className="w-3.5 h-3.5" />
         </button>
+      </div>
+    );
+  }
+
+  if (!video) {
+    return (
+      <div className="flex flex-col h-full bg-slate-950 text-slate-100 border-b border-slate-800/80 overflow-hidden relative select-none">
+        <ConnectLectureModal
+          isOpen={isConnectModalOpen}
+          onClose={() => setIsConnectModalOpen(false)}
+          onConnectLecture={handleConnectLecture}
+        />
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3">
+          <div className="w-12 h-12 rounded-2xl bg-red-600/10 border border-red-500/20 text-red-400 flex items-center justify-center">
+            <Youtube className="w-6 h-6" />
+          </div>
+          <div className="space-y-1">
+            <h4 className="font-semibold text-xs text-slate-200">No Lecture Connected</h4>
+            <p className="text-[11px] text-slate-400 max-w-xs">
+              Attach a YouTube video lecture related to this textbook to study alongside video explanations.
+            </p>
+          </div>
+          <button
+            onClick={() => setIsConnectModalOpen(true)}
+            className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold shadow-md transition-colors flex items-center gap-1.5"
+          >
+            <Youtube className="w-3.5 h-3.5" />
+            <span>Connect YouTube Lecture</span>
+          </button>
+        </div>
       </div>
     );
   }
@@ -173,75 +207,83 @@ export const VideoPanel: React.FC<VideoPanelProps> = ({
           />
         </div>
 
-        {/* Compact Synchronized Topic & Actions Bar */}
-        <div className="p-2.5 bg-slate-900/90 border border-slate-800/90 rounded-xl space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-200 truncate">
-              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-500/30 font-bold shrink-0">
-                {activeTopic.formattedTime}
+        {/* Synchronized Topic & Actions Bar if topics exist */}
+        {activeTopic ? (
+          <div className="p-2.5 bg-slate-900/90 border border-slate-800/90 rounded-xl space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-200 truncate">
+                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-500/30 font-bold shrink-0">
+                  {activeTopic.formattedTime}
+                </span>
+                <span className="truncate">{activeTopic.title}</span>
+              </div>
+
+              <span className="shrink-0 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-mono flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3" />
+                <span>p.{activeTopic.pageNumber}</span>
               </span>
-              <span className="truncate">{activeTopic.title}</span>
             </div>
 
-            <span className="shrink-0 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-mono flex items-center gap-1">
-              <CheckCircle2 className="w-3 h-3" />
-              <span>p.{activeTopic.pageNumber}</span>
-            </span>
-          </div>
-
-          {/* Connected Action Buttons */}
-          <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/60">
-            <button
-              onClick={() => onNavigateToTextbookPage(activeTopic.pageNumber)}
-              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-[11px] font-medium transition-colors"
-            >
-              <BookOpen className="w-3 h-3" />
-              <span>Find in Textbook (p.{activeTopic.pageNumber})</span>
-            </button>
-
-            <button
-              onClick={() => onAskAIAboutVideo(activeTopic)}
-              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium transition-colors border border-slate-700/60"
-            >
-              <Sparkles className="w-3 h-3 text-amber-400" />
-              <span>Ask AI</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Lecture Chapter Markers (Compact Grid) */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-1">
-            <span>Lecture Timestamps:</span>
-            <button
-              onClick={() => setShowAllTopics(!showAllTopics)}
-              className="text-indigo-400 hover:underline normal-case text-[10px]"
-            >
-              {showAllTopics ? "Show less" : `View all (${video.topics.length})`}
-            </button>
-          </div>
-
-          <div className="grid grid-cols-2 gap-1">
-            {(showAllTopics ? video.topics : video.topics.slice(0, 4)).map((t, idx) => (
+            {/* Connected Action Buttons */}
+            <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/60">
               <button
-                key={idx}
-                onClick={() => handleTopicClick(idx)}
-                className={`p-1.5 rounded-lg text-left border transition-all text-xs flex items-center justify-between ${
-                  activeTopicIndex === idx
-                    ? "bg-indigo-950/60 border-indigo-500/80 text-indigo-200 shadow-sm"
-                    : "bg-slate-900/50 border-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                }`}
+                onClick={() => onNavigateToTextbookPage(activeTopic.pageNumber)}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-[11px] font-medium transition-colors"
               >
-                <span className="truncate text-[10px] font-medium text-slate-200 pr-1">
-                  {t.formattedTime} {t.title}
-                </span>
-                <span className="text-[9px] text-slate-500 font-mono shrink-0">
-                  p.{t.pageNumber}
-                </span>
+                <BookOpen className="w-3 h-3" />
+                <span>Find in Textbook (p.{activeTopic.pageNumber})</span>
               </button>
-            ))}
+
+              <button
+                onClick={() => onAskAIAboutVideo(activeTopic)}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium transition-colors border border-slate-700/60"
+              >
+                <Sparkles className="w-3 h-3 text-amber-400" />
+                <span>Ask AI</span>
+              </button>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="p-2.5 bg-slate-900/60 border border-slate-800/60 rounded-xl text-center text-xs text-slate-400">
+            <span>Video synced with study workspace</span>
+          </div>
+        )}
+
+        {/* Lecture Chapter Markers (if topics available) */}
+        {video.topics && video.topics.length > 0 && (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-1">
+              <span>Lecture Timestamps:</span>
+              <button
+                onClick={() => setShowAllTopics(!showAllTopics)}
+                className="text-indigo-400 hover:underline normal-case text-[10px]"
+              >
+                {showAllTopics ? "Show less" : `View all (${video.topics.length})`}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-1">
+              {(showAllTopics ? video.topics : video.topics.slice(0, 4)).map((t, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleTopicClick(idx)}
+                  className={`p-1.5 rounded-lg text-left border transition-all text-xs flex items-center justify-between ${
+                    activeTopicIndex === idx
+                      ? "bg-indigo-950/60 border-indigo-500/80 text-indigo-200 shadow-sm"
+                      : "bg-slate-900/50 border-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                  }`}
+                >
+                  <span className="truncate text-[10px] font-medium text-slate-200 pr-1">
+                    {t.formattedTime} {t.title}
+                  </span>
+                  <span className="text-[9px] text-slate-500 font-mono shrink-0">
+                    p.{t.pageNumber}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

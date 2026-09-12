@@ -15,8 +15,8 @@ export const ConnectLectureModal: React.FC<ConnectLectureModalProps> = ({
   onClose,
   onConnectLecture,
 }) => {
-  const [url, setUrl] = useState<string>("https://www.youtube.com/watch?v=F27PLhn3W04");
-  const [title, setTitle] = useState<string>("TCP 3-Way Handshake & Transport Layer");
+  const [url, setUrl] = useState<string>("");
+  const [title, setTitle] = useState<string>("");
   const [error, setError] = useState<string>("");
 
   if (!isOpen) return null;
@@ -87,7 +87,7 @@ export const ConnectLectureModal: React.FC<ConnectLectureModalProps> = ({
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Stanford CS144 - Transport Layer Protocols"
+              placeholder="e.g. University Lecture / Topic Video"
               required
               className="w-full bg-slate-950 text-xs px-3 py-2.5 rounded-xl border border-slate-800 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
             />

@@ -84,7 +84,7 @@ export async function retrieveRelevantContext(
   const scoredChunks: HybridSearchResult[] = [];
 
   const isDemo = isDemoMode() || book.id.startsWith("demo-");
-  const supabase = createServerSupabaseClient() || createAdminClient();
+  const supabase = await createServerSupabaseClient() || createAdminClient();
 
   // If real user book in production, use pgvector similarity search
   if (supabase && book.id && !isDemo) {

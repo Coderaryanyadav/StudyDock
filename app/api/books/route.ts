@@ -1,59 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, isDemoMode } from "@/lib/supabase/auth";
+import { authenticateRequest } from "@/lib/supabase/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { DEMO_BOOK } from "@/lib/demo-data";
-
 export async function GET(req: NextRequest) {
   try {
     const auth = await authenticateRequest(req);
     const userId = auth?.id;
 
     if (!userId) {
-      if (isDemoMode()) {
-        return NextResponse.json({
-          success: true,
-          books: [
-            {
-              id: DEMO_BOOK.id,
-              title: DEMO_BOOK.title,
-              author: DEMO_BOOK.author,
-              edition: DEMO_BOOK.edition,
-              subject: DEMO_BOOK.subject,
-              totalPages: DEMO_BOOK.totalPages,
-              status: "READY",
-              lastPageRead: 72,
-              createdAt: new Date().toISOString(),
-            },
-          ],
-        });
-      }
       return NextResponse.json(
         { error: "Authentication required to view your library." },
         { status: 401 }
       );
     }
 
-    const supabase = createServerSupabaseClient() || createAdminClient();
+    const supabase = await createServerSupabaseClient() || createAdminClient();
     if (!supabase) {
-      if (isDemoMode()) {
-        return NextResponse.json({
-          success: true,
-          books: [
-            {
-              id: DEMO_BOOK.id,
-              title: DEMO_BOOK.title,
-              author: DEMO_BOOK.author,
-              edition: DEMO_BOOK.edition,
-              subject: DEMO_BOOK.subject,
-              totalPages: DEMO_BOOK.totalPages,
-              status: "READY",
-              lastPageRead: 72,
-              createdAt: new Date().toISOString(),
-            },
-          ],
-        });
-      }
       return NextResponse.json(
         { error: "Database service is unconfigured. Please configure Supabase environment variables." },
         { status: 500 }

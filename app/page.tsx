@@ -35,6 +35,10 @@ export default function Home() {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
 
+  // Dynamic Quiz & Flashcards state
+  const [quizQuestions, setQuizQuestions] = useState(DEMO_QUIZ_QUESTIONS);
+  const [flashcards, setFlashcards] = useState(DEMO_FLASHCARDS);
+
   // Target citation page jump tracker
   const [targetCitationPage, setTargetCitationPage] = useState<number | null>(null);
 
@@ -164,6 +168,60 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activeBook.totalPages]);
 
+  const handleOpenQuizModal = async () => {
+    setIsQuizModalOpen(true);
+    if (activeBook.id && !activeBook.id.startsWith("demo-")) {
+      const activePageObj = activeBook.pages.find((p) => p.pageNumber === activePageNumber) || activeBook.pages[0];
+      try {
+        const res = await fetch("/api/quiz/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bookId: activeBook.id,
+            pageNumber: activePageNumber,
+            contextText: activePageObj?.content || "",
+            concept: activePageObj?.sectionTitle || activeBook.title,
+          }),
+        });
+        const data = await res.json();
+        if (res.ok && data.success && data.questions?.length > 0) {
+          setQuizQuestions(data.questions);
+        }
+      } catch (err) {
+        console.warn("Quiz generation note:", err);
+      }
+    } else {
+      setQuizQuestions(DEMO_QUIZ_QUESTIONS);
+    }
+  };
+
+  const handleOpenFlashcardsModal = async () => {
+    setIsFlashcardsModalOpen(true);
+    if (activeBook.id && !activeBook.id.startsWith("demo-")) {
+      const activePageObj = activeBook.pages.find((p) => p.pageNumber === activePageNumber) || activeBook.pages[0];
+      try {
+        const res = await fetch("/api/flashcards/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bookId: activeBook.id,
+            pageNumber: activePageNumber,
+            contextText: activePageObj?.content || "",
+            concept: activePageObj?.sectionTitle || activeBook.title,
+          }),
+        });
+        const data = await res.json();
+        if (res.ok && data.success && data.flashcards?.length > 0) {
+          setFlashcards(data.flashcards);
+        }
+      } catch (err) {
+        console.warn("Flashcards generation note:", err);
+      }
+    } else {
+      setFlashcards(DEMO_FLASHCARDS);
+    }
+  };
+
   const handleDocumentUploaded = (newBook: Book) => {
     setActiveBook(newBook);
     setActivePageNumber(newBook.pages[0]?.pageNumber || 1);
@@ -179,9 +237,9 @@ export default function Home() {
 
   const handleCommandPaletteAction = (action: string) => {
     if (action === "quiz") {
-      setIsQuizModalOpen(true);
+      handleOpenQuizModal();
     } else if (action === "flashcards") {
-      setIsFlashcardsModalOpen(true);
+      handleOpenFlashcardsModal();
     } else if (action === "library") {
       setIsLibraryModalOpen(true);
     }
@@ -198,8 +256,8 @@ export default function Home() {
         onOpenLibraryModal={() => setIsLibraryModalOpen(true)}
         onOpenUploadModal={() => setIsUploadModalOpen(true)}
         onOpenShortcutsModal={() => setIsShortcutsModalOpen(true)}
-        onOpenQuizModal={() => setIsQuizModalOpen(true)}
-        onOpenFlashcardsModal={() => setIsFlashcardsModalOpen(true)}
+        onOpenQuizModal={handleOpenQuizModal}
+        onOpenFlashcardsModal={handleOpenFlashcardsModal}
         onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
         onResetDemo={() => {
@@ -220,8 +278,8 @@ export default function Home() {
             onUpdateVideo={setActiveVideo}
             targetCitationPage={targetCitationPage}
             onClearTargetCitation={() => setTargetCitationPage(null)}
-            onLaunchQuiz={() => setIsQuizModalOpen(true)}
-            onLaunchFlashcards={() => setIsFlashcardsModalOpen(true)}
+            onLaunchQuiz={handleOpenQuizModal}
+            onLaunchFlashcards={handleOpenFlashcardsModal}
           />
         )}
 
@@ -232,8 +290,8 @@ export default function Home() {
               if (page) setActivePageNumber(page);
               setCurrentView("workspace");
             }}
-            onLaunchQuiz={() => setIsQuizModalOpen(true)}
-            onLaunchFlashcards={() => setIsFlashcardsModalOpen(true)}
+            onLaunchQuiz={handleOpenQuizModal}
+            onLaunchFlashcards={handleOpenFlashcardsModal}
           />
         )}
 
@@ -279,14 +337,18 @@ export default function Home() {
       <QuizModal
         isOpen={isQuizModalOpen}
         onClose={() => setIsQuizModalOpen(false)}
-        questions={DEMO_QUIZ_QUESTIONS}
+        questions={quizQuestions}
+        bookTitle={activeBook.title}
+        pageNumber={activePageNumber}
         onFinishQuiz={handleQuizFinish}
       />
 
       <FlashcardsModal
         isOpen={isFlashcardsModalOpen}
         onClose={() => setIsFlashcardsModalOpen(false)}
-        flashcards={DEMO_FLASHCARDS}
+        flashcards={flashcards}
+        bookTitle={activeBook.title}
+        pageNumber={activePageNumber}
       />
 
       <ShortcutsModal

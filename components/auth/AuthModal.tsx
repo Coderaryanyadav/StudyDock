@@ -32,13 +32,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     const supabase = getSupabaseBrowserClient();
     if (!supabase) {
-      // Offline / Local Demo mode
-      setTimeout(() => {
-        setIsLoading(false);
-        setSuccessMsg("Logged in to Local Study Session.");
-        if (onAuthSuccess) onAuthSuccess(email || "scholar@studydock.ai");
-        setTimeout(onClose, 1000);
-      }, 600);
+      setError("Supabase is not configured. Please ensure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are set in your environment.");
+      setIsLoading(false);
       return;
     }
 

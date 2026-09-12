@@ -51,13 +51,13 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
       id: "msg-welcome",
       sender: "ai",
       content: `Hello! I'm your **AI Academic Tutor** for *${book.title}*.\n\nI'm currently tracking your progress on **Page ${activePageNumber}** (*${
-        book.pages.find((p) => p.pageNumber === activePageNumber)?.sectionTitle || "Transport Layer"
-      }*).\n\nAsk me anything about the textbook, video lectures, or select any text on the left to get instant breakdowns!`,
+        book.pages.find((p) => p.pageNumber === activePageNumber)?.sectionTitle || "Current Page"
+      }*).\n\nAsk me anything about the textbook, attached lectures, or select text in the reader to get deep-dive explanations!`,
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       suggestedFollowUps: [
-        "Why does TCP need three messages?",
-        "Explain flow control and rwnd",
-        "Give me an exam-style quiz",
+        "Summarize the key concepts on this page",
+        "Explain this in simple terms with an analogy",
+        "Generate practice questions from this section",
       ],
     },
   ]);
@@ -435,28 +435,28 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
           Suggested:
         </span>
         <button
-          onClick={() => handleSendMessage("Why does TCP need three messages?", "explain")}
+          onClick={() => handleSendMessage("Summarize the key concepts on this page", "summary")}
           className="px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white shrink-0 border border-slate-700/50 transition-colors"
         >
-          Why 3 messages for TCP?
+          Summarize page
         </button>
         <button
-          onClick={() => handleSendMessage("Explain flow control and the rwnd buffer equation", "deep_dive")}
+          onClick={() => handleSendMessage("Explain the core mechanics on this page with an intuitive analogy", "explain")}
           className="px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white shrink-0 border border-slate-700/50 transition-colors"
         >
-          Flow control & rwnd
+          Explain simpler
         </button>
         <button
-          onClick={() => handleSendMessage("What should I remember for my exam from this section?", "exam")}
+          onClick={() => handleSendMessage("What are the most likely exam questions from this section?", "exam")}
           className="px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white shrink-0 border border-slate-700/50 transition-colors"
         >
           Exam review points
         </button>
         <button
-          onClick={() => handleSendMessage("Quiz me on this chapter", "quiz")}
+          onClick={() => handleSendMessage("Give me a deep-dive technical breakdown of this material", "deep_dive")}
           className="px-2.5 py-1 rounded-lg bg-indigo-950/60 hover:bg-indigo-900 text-indigo-300 shrink-0 border border-indigo-500/30 transition-colors"
         >
-          Quiz me
+          Deep dive
         </button>
       </div>
 

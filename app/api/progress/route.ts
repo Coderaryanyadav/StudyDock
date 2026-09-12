@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
+import { authenticateRequest, verifyBookOwnership, isDemoMode } from "@/lib/supabase/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export async function GET(req: NextRequest) {
@@ -8,23 +8,45 @@ export async function GET(req: NextRequest) {
     const userId = auth?.id;
 
     if (!userId) {
+      if (isDemoMode()) {
+        return NextResponse.json({
+          authenticated: false,
+          streakDays: 5,
+          totalStudyMinutes: 142,
+          questionsAsked: 28,
+          conceptsMastered: 14,
+          concepts: [],
+        });
+      }
       return NextResponse.json({
         authenticated: false,
-        streakDays: 5,
-        totalStudyMinutes: 142,
-        questionsAsked: 28,
-        conceptsMastered: 14,
+        streakDays: 0,
+        totalStudyMinutes: 0,
+        questionsAsked: 0,
+        conceptsMastered: 0,
+        concepts: [],
       });
     }
 
     const supabase = await createServerSupabaseClient();
     if (!supabase) {
+      if (isDemoMode()) {
+        return NextResponse.json({
+          authenticated: true,
+          streakDays: 5,
+          totalStudyMinutes: 142,
+          questionsAsked: 28,
+          conceptsMastered: 14,
+          concepts: [],
+        });
+      }
       return NextResponse.json({
         authenticated: true,
-        streakDays: 5,
-        totalStudyMinutes: 142,
-        questionsAsked: 28,
-        conceptsMastered: 14,
+        streakDays: 0,
+        totalStudyMinutes: 0,
+        questionsAsked: 0,
+        conceptsMastered: 0,
+        concepts: [],
       });
     }
 

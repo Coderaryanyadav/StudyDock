@@ -8,6 +8,9 @@ interface QuizModalProps {
   isOpen: boolean;
   onClose: () => void;
   questions: QuizQuestion[];
+  bookTitle?: string;
+  chapterTitle?: string;
+  pageNumber?: number;
   onFinishQuiz?: (score: number, total: number) => void;
 }
 
@@ -15,6 +18,9 @@ export const QuizModal: React.FC<QuizModalProps> = ({
   isOpen,
   onClose,
   questions,
+  bookTitle,
+  chapterTitle,
+  pageNumber,
   onFinishQuiz,
 }) => {
   const [currentIndex, setCurrentIndex] = useState<number>(0);
@@ -93,7 +99,9 @@ export const QuizModal: React.FC<QuizModalProps> = ({
             </div>
             <div>
               <h3 className="font-bold text-base text-white">Interactive Practice Quiz</h3>
-              <p className="text-xs text-slate-400">Contextual questions based on Chapter 3: Transport Layer</p>
+              <p className="text-xs text-slate-400">
+                {bookTitle ? `${bookTitle} ${pageNumber ? `— Page ${pageNumber}` : ""}` : chapterTitle || "Textbook Material"}
+              </p>
             </div>
           </div>
           <button

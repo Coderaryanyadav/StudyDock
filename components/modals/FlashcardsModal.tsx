@@ -8,16 +8,28 @@ interface FlashcardsModalProps {
   isOpen: boolean;
   onClose: () => void;
   flashcards: Flashcard[];
+  bookTitle?: string;
+  chapterTitle?: string;
+  pageNumber?: number;
 }
 
 export const FlashcardsModal: React.FC<FlashcardsModalProps> = ({
   isOpen,
   onClose,
   flashcards,
+  bookTitle,
+  chapterTitle,
+  pageNumber,
 }) => {
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isFlipped, setIsFlipped] = useState<boolean>(false);
   const [cards, setCards] = useState<Flashcard[]>(flashcards);
+
+  React.useEffect(() => {
+    setCards(flashcards);
+    setCurrentIndex(0);
+    setIsFlipped(false);
+  }, [flashcards]);
 
   if (!isOpen) return null;
 
@@ -51,7 +63,9 @@ export const FlashcardsModal: React.FC<FlashcardsModalProps> = ({
             </div>
             <div>
               <h3 className="font-bold text-base text-white">Interactive Flashcards</h3>
-              <p className="text-xs text-slate-400">Chapter 3: Transport Layer & Networking</p>
+              <p className="text-xs text-slate-400">
+                {bookTitle ? `${bookTitle} ${pageNumber ? `— Page ${pageNumber}` : ""}` : chapterTitle || "Textbook Flashcards"}
+              </p>
             </div>
           </div>
           <button

@@ -288,3 +288,80 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const bookId = searchParams.get("bookId");
+
+    const auth = await authenticateRequest(req);
+    const userId = auth?.id;
+
+    if (!userId) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+
+    if (!bookId) {
+      return NextResponse.json({ error: "Book ID is required." }, { status: 400 });
+    }
+
+    const isOwner = await verifyBookOwnership(userId, bookId);
+    if (!isOwner) {
+      return NextResponse.json({ error: "Access denied." }, { status: 403 });
+    }
+
+    const supabase = (await createServerSupabaseClient()) || createAdminClient();
+    if (!supabase) {
+      return NextResponse.json({ success: true, messages: [] });
+    }
+
+    // Find the latest active conversation for this book
+    const { data: conv } = await supabase
+      .from("conversations")
+      .select("id, title")
+      .eq("user_id", userId)
+      .eq("book_id", bookId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!conv) {
+      return NextResponse.json({ success: true, conversationId: null, messages: [] });
+    }
+
+    // Fetch messages for this conversation
+    const { data: messagesData, error: msgErr } = await supabase
+      .from("messages")
+      .select("*, message_citations(*)")
+      .eq("conversation_id", conv.id)
+      .order("created_at", { ascending: true });
+
+    if (msgErr || !messagesData) {
+      return NextResponse.json({ success: true, conversationId: conv.id, messages: [] });
+    }
+
+    const messages = messagesData.map((m: any) => ({
+      id: m.id,
+      sender: m.role === "user" ? "user" : "ai",
+      content: m.content,
+      timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      learningMode: m.learning_mode,
+      citations: (m.message_citations || []).map((c: any) => ({
+        id: c.id,
+        sourceType: c.source_type,
+        bookTitle: c.source_title,
+        pageNumber: c.page_number,
+        excerpt: c.excerpt,
+      })),
+    }));
+
+    return NextResponse.json({
+      success: true,
+      conversationId: conv.id,
+      messages,
+    });
+  } catch (error: any) {
+    console.error("Fetch chat history error:", error);
+    return NextResponse.json({ success: true, messages: [] });
+  }
+}

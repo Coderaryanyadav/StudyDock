@@ -36,7 +36,7 @@ export async function getProgressForUser(userId: string): Promise<StudentProgres
       );
 
       const today = new Date();
-      let checkDate = new Date(today);
+      const checkDate = new Date(today);
       let dayStr = checkDate.toISOString().split("T")[0];
 
       if (!uniqueDays.has(dayStr)) {

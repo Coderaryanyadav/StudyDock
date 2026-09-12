@@ -74,6 +74,33 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
     }
   };
 
+  // Load persistent conversation history for this book
+  useEffect(() => {
+    if (!book?.id) return;
+    fetch(`/api/chat?bookId=${encodeURIComponent(book.id)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.messages) && data.messages.length > 0) {
+          setMessages(data.messages);
+        } else {
+          setMessages([
+            {
+              id: `msg-welcome-${book.id}`,
+              sender: "ai",
+              content: `Hello! I'm your **AI Academic Tutor** for *${book.title}*.\n\nI'm currently tracking your progress on **Page ${activePageNumber}**.\n\nAsk me anything about the textbook, attached lectures, or select text in the reader to get deep-dive explanations!`,
+              timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+              suggestedFollowUps: [
+                "Summarize the key concepts on this page",
+                "Explain this in simple terms with an analogy",
+                "Generate practice questions from this section",
+              ],
+            },
+          ]);
+        }
+      })
+      .catch((err) => console.warn("Failed to load conversation history:", err));
+  }, [book?.id, book?.title, activePageNumber]);
+
   useEffect(() => {
     if (messages.length > 1 || isStreaming) {
       scrollToBottom();
@@ -499,7 +526,7 @@ function formatAiResponseHtml(
   content: string,
   onNavigate: (page: number) => void
 ): string {
-  let html = content
+  const html = content
     // Headings
     .replace(/^### (.*$)/gim, '<h3 class="text-sm font-bold text-indigo-300 mt-2.5 mb-1">$1</h3>')
     .replace(/^#### (.*$)/gim, '<h4 class="text-xs font-semibold text-slate-200 mt-2 mb-1">$1</h4>')

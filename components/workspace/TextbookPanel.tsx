@@ -19,9 +19,11 @@ import {
   HelpCircle,
   Copy,
   Check,
+  Eye,
 } from "lucide-react";
 import { Book, BookPage, Highlight, LearningMode } from "@/types";
 import { TextbookSelectionToolbar } from "./TextbookSelectionToolbar";
+import { PdfViewer } from "./PdfViewer";
 import { renderMathInText } from "@/lib/katex-renderer";
 
 interface TextbookPanelProps {
@@ -44,6 +46,8 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [showToc, setShowToc] = useState<boolean>(false);
   const [showBookmarks, setShowBookmarks] = useState<boolean>(false);
+  const [showHighlights, setShowHighlights] = useState<boolean>(false);
+  const [viewMode, setViewMode] = useState<"pdf" | "text">("pdf");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [bookmarks, setBookmarks] = useState<number[]>([]);
@@ -53,17 +57,21 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
   const [selectedText, setSelectedText] = useState<string>("");
   const [copied, setCopied] = useState<boolean>(false);
 
-  const [showHighlights, setShowHighlights] = useState<boolean>(false);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // Load persistent annotations for this book
+  // 1. Load persistent annotations & bookmarks from database
   useEffect(() => {
     if (!book?.id) return;
     fetch(`/api/annotations?bookId=${encodeURIComponent(book.id)}`)
       .then((res) => res.json())
       .then((data) => {
-        if (data.success && Array.isArray(data.highlights)) {
-          setHighlights(data.highlights);
+        if (data.success) {
+          if (Array.isArray(data.highlights)) {
+            setHighlights(data.highlights);
+          }
+          if (Array.isArray(data.bookmarks)) {
+            setBookmarks(data.bookmarks.map((b: any) => b.pageNumber));
+          }
         }
       })
       .catch((err) => console.warn("Failed to load annotations:", err));
@@ -94,10 +102,10 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
       sectionId: null,
       sectionTitle: null,
       title: `Page ${activePageNumber}`,
-      content: "Content loading...",
+      content: "",
     };
 
-  // Handle text selection in textbook
+  // Handle text selection in textbook / PDF canvas
   const handleMouseUp = () => {
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed) {
@@ -107,14 +115,18 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
     }
 
     const text = selection.toString().trim();
-    if (text.length > 3) {
+    if (text.length > 2) {
       setSelectedText(text);
-      const range = selection.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      setSelectionToolbarPos({
-        x: rect.left + rect.width / 2 - 100,
-        y: rect.top - 10,
-      });
+      try {
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        setSelectionToolbarPos({
+          x: Math.max(10, rect.left + rect.width / 2 - 100),
+          y: Math.max(10, rect.top - 10),
+        });
+      } catch (e) {
+        setSelectionToolbarPos(null);
+      }
     } else {
       setSelectionToolbarPos(null);
       setSelectedText("");
@@ -143,6 +155,7 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          type: "highlight",
           bookId: book.id,
           pageNumber: activePageNumber,
           text: selectedText,
@@ -170,23 +183,37 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
   };
 
   const toggleBookmark = () => {
-    if (bookmarks.includes(activePageNumber)) {
-      setBookmarks(bookmarks.filter((p) => p !== activePageNumber));
+    const isBookmarked = bookmarks.includes(activePageNumber);
+    if (isBookmarked) {
+      setBookmarks((prev) => prev.filter((p) => p !== activePageNumber));
+      fetch(`/api/annotations?type=bookmark&bookId=${encodeURIComponent(book.id)}&pageNumber=${activePageNumber}`, {
+        method: "DELETE",
+      }).catch((err) => console.warn("Failed to remove bookmark:", err));
     } else {
-      setBookmarks([...bookmarks, activePageNumber]);
+      setBookmarks((prev) => [...prev, activePageNumber]);
+      fetch("/api/annotations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "bookmark",
+          bookId: book.id,
+          pageNumber: activePageNumber,
+          title: `Page ${activePageNumber}`,
+        }),
+      }).catch((err) => console.warn("Failed to persist bookmark:", err));
     }
   };
 
   const handleZoom = (delta: number) => {
-    setZoomLevel((prev) => Math.min(175, Math.max(75, prev + delta)));
+    setZoomLevel((prev) => Math.min(200, Math.max(60, prev + delta)));
   };
 
-  // Search matches
+  // Search matches across pages
   const searchResults = searchQuery.trim()
     ? book.pages.filter(
         (p) =>
-          p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          p.content.toLowerCase().includes(searchQuery.toLowerCase())
+          (p.title && p.title.toLowerCase().includes(searchQuery.toLowerCase())) ||
+          (p.content && p.content.toLowerCase().includes(searchQuery.toLowerCase()))
       )
     : [];
 
@@ -194,12 +221,13 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
     <div className="flex flex-col h-full bg-slate-950 text-slate-100 border-r border-slate-800/80 select-text overflow-hidden relative">
       {/* Textbook Header Controls */}
       <div className="flex items-center justify-between px-3 py-2 bg-slate-900/90 border-b border-slate-800 backdrop-blur-sm z-20">
-        {/* Left: TOC & Bookmarks buttons */}
+        {/* Left: TOC, Bookmarks, Highlights drawers & View mode switch */}
         <div className="flex items-center gap-1">
           <button
             onClick={() => {
               setShowToc(!showToc);
               setShowBookmarks(false);
+              setShowHighlights(false);
             }}
             className={`p-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors ${
               showToc
@@ -245,6 +273,31 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
             <Highlighter className="w-4 h-4 text-yellow-400" />
             <span className="hidden md:inline">({highlights.length})</span>
           </button>
+
+          {/* View Mode Toggle: Original PDF vs Extracted Text */}
+          <div className="hidden lg:flex items-center ml-1 pl-1 border-l border-slate-800">
+            <button
+              onClick={() => setViewMode(viewMode === "pdf" ? "text" : "pdf")}
+              className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors ${
+                viewMode === "pdf"
+                  ? "bg-indigo-600/20 text-indigo-300 border border-indigo-500/30"
+                  : "bg-slate-800/80 text-slate-300 hover:bg-slate-800"
+              }`}
+              title="Toggle between Original PDF and Text Extraction"
+            >
+              {viewMode === "pdf" ? (
+                <>
+                  <Eye className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Original PDF</span>
+                </>
+              ) : (
+                <>
+                  <FileText className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Text View</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Center: Chapter info & Page Navigator */}
@@ -258,7 +311,7 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
             <ChevronLeft className="w-4 h-4" />
           </button>
 
-          <div className="flex items-center gap-1 font-mono bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+          <div className="flex items-center gap-1 font-mono bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800 shadow-inner">
             <span className="text-indigo-400 font-semibold">{activePageNumber}</span>
             <span className="text-slate-600">/</span>
             <span className="text-slate-400">{book.totalPages || book.pages.length || 1}</span>
@@ -283,7 +336,7 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
                 ? "bg-indigo-600/30 text-indigo-300"
                 : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"
             }`}
-            title="Search in Textbook (Cmd+F)"
+            title="Search in Textbook"
           >
             <Search className="w-4 h-4" />
           </button>
@@ -326,13 +379,13 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
         </div>
       </div>
 
-      {/* Search Input Bar (Expandable) */}
+      {/* Search Input Bar */}
       {isSearching && (
         <div className="px-3 py-2 bg-slate-900 border-b border-slate-800 flex items-center gap-2 animate-in slide-in-from-top-2 duration-150">
           <Search className="w-4 h-4 text-slate-400 shrink-0" />
           <input
             type="text"
-            placeholder="Search within textbook (e.g. handshake, rwnd, AIMD, subnet)..."
+            placeholder="Search within textbook chapters & pages..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             autoFocus
@@ -349,14 +402,14 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
         </div>
       )}
 
-      {/* Search Results Dropdown Overlay */}
+      {/* Search Results Overlay */}
       {isSearching && searchQuery.trim().length > 0 && (
         <div className="bg-slate-900/95 border-b border-slate-800 max-h-48 overflow-y-auto px-3 py-2 text-xs divide-y divide-slate-800/60 z-20 shadow-lg">
           <div className="text-[11px] font-semibold text-slate-400 mb-1">
             Found {searchResults.length} matching page(s):
           </div>
           {searchResults.length === 0 ? (
-            <div className="text-slate-500 py-1 italic">No matches found.</div>
+            <div className="text-slate-500 py-1 italic">No matching pages found.</div>
           ) : (
             searchResults.map((p) => (
               <button
@@ -368,16 +421,16 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
                 className="w-full text-left py-1.5 px-2 hover:bg-slate-800 rounded transition-colors flex items-center justify-between text-slate-300 hover:text-indigo-300"
               >
                 <div className="truncate font-medium">
-                  Page {p.pageNumber}: {p.title}
+                  Page {p.pageNumber}: {p.title || `Page ${p.pageNumber}`}
                 </div>
-                <span className="text-[10px] text-slate-500 ml-2">Jump →</span>
+                <span className="text-[10px] text-indigo-400 ml-2">Jump →</span>
               </button>
             ))
           )}
         </div>
       )}
 
-      {/* Main Workspace Container with TOC Drawer */}
+      {/* Main Workspace Container */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Table of Contents Drawer */}
         {showToc && (
@@ -394,34 +447,56 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
               </button>
             </div>
             <div className="space-y-3">
-              {book.chapters.map((ch) => (
-                <div key={ch.id} className="space-y-1">
-                  <div className="font-semibold text-slate-300 text-[11px] uppercase tracking-wider">
-                    Ch {ch.number}: {ch.title}
+              {book.chapters.length > 0 ? (
+                book.chapters.map((ch) => (
+                  <div key={ch.id} className="space-y-1">
+                    <div className="font-semibold text-slate-300 text-[11px] uppercase tracking-wider">
+                      Ch {ch.number}: {ch.title}
+                    </div>
+                    <div className="space-y-0.5 pl-2 border-l border-slate-800">
+                      {ch.sections.map((sec) => (
+                        <button
+                          key={sec.id}
+                          onClick={() => {
+                            onPageChange(sec.page);
+                            setShowToc(false);
+                          }}
+                          className={`w-full text-left py-1 px-1.5 rounded transition-colors text-[11px] flex items-center justify-between ${
+                            activePageNumber === sec.page
+                              ? "bg-indigo-600/30 text-indigo-300 font-medium"
+                              : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                          }`}
+                        >
+                          <span className="truncate">{sec.title}</span>
+                          <span className="text-[10px] font-mono text-slate-500 ml-1">
+                            p.{sec.page}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <div className="space-y-0.5 pl-2 border-l border-slate-800">
-                    {ch.sections.map((sec) => (
-                      <button
-                        key={sec.id}
-                        onClick={() => {
-                          onPageChange(sec.page);
-                          setShowToc(false);
-                        }}
-                        className={`w-full text-left py-1 px-1.5 rounded transition-colors text-[11px] flex items-center justify-between ${
-                          activePageNumber === sec.page
-                            ? "bg-indigo-600/30 text-indigo-300 font-medium"
-                            : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                        }`}
-                      >
-                        <span className="truncate">{sec.title}</span>
-                        <span className="text-[10px] font-mono text-slate-500 ml-1">
-                          p.{sec.page}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+                ))
+              ) : (
+                <div className="space-y-1">
+                  {book.pages.slice(0, 30).map((p) => (
+                    <button
+                      key={p.pageNumber}
+                      onClick={() => {
+                        onPageChange(p.pageNumber);
+                        setShowToc(false);
+                      }}
+                      className={`w-full text-left py-1 px-1.5 rounded transition-colors text-[11px] flex items-center justify-between ${
+                        activePageNumber === p.pageNumber
+                          ? "bg-indigo-600/30 text-indigo-300 font-medium"
+                          : "text-slate-400 hover:bg-slate-800"
+                      }`}
+                    >
+                      <span className="truncate">{p.title || `Page ${p.pageNumber}`}</span>
+                      <span className="text-[10px] font-mono text-slate-500">p.{p.pageNumber}</span>
+                    </button>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           </div>
         )}
@@ -519,13 +594,13 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
           </div>
         )}
 
-        {/* Digital Textbook Reading Canvas */}
+        {/* Digital Textbook Reading Canvas / Real PDF Canvas */}
         <div
           ref={contentRef}
           onMouseUp={handleMouseUp}
-          className="flex-1 overflow-y-auto p-2 sm:p-4 md:p-6 flex justify-center bg-slate-950/60 custom-scrollbar"
+          className="flex-1 overflow-y-auto p-2 sm:p-4 md:p-6 flex justify-center bg-slate-950/60 custom-scrollbar relative"
         >
-          {/* Floating Context Toolbar */}
+          {/* Floating Context Toolbar on Selection */}
           <TextbookSelectionToolbar
             position={selectionToolbarPos}
             selectedText={selectedText}
@@ -533,140 +608,63 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
             onClose={() => setSelectionToolbarPos(null)}
           />
 
-          {/* Textbook Sheet (Realistic Academic Paper feel) */}
-          <div
-            style={{
-              zoom: `${zoomLevel}%`,
-            }}
-            className="w-full max-w-3xl bg-slate-900 border border-slate-800/90 rounded-2xl shadow-2xl shadow-slate-950/80 p-4 sm:p-6 md:p-8 flex flex-col relative"
-          >
-            {/* Textbook Page Header */}
-            <div className="flex items-center justify-between pb-4 mb-6 border-b border-slate-800 text-[11px] text-slate-400 uppercase tracking-widest font-mono">
-              <span className="truncate max-w-[320px]">{currentPage.chapterTitle}</span>
-              <span className="text-indigo-400 font-bold">Page {currentPage.pageNumber}</span>
-            </div>
-
-            {/* Rendered Academic Content */}
-            <div className="prose prose-invert prose-indigo max-w-none text-slate-200 text-sm leading-relaxed space-y-4">
-              <div
-                dangerouslySetInnerHTML={{
-                  __html: formatTextbookContent(currentPage.content),
-                }}
+          {viewMode === "pdf" ? (
+            /* Real Original Uploaded PDF Canvas Renderer */
+            <div className="w-full flex justify-center items-start">
+              <PdfViewer
+                bookId={book.id}
+                pageNumber={activePageNumber}
+                scale={zoomLevel / 100}
+                onPageChange={onPageChange}
+                onMouseUp={handleMouseUp}
+                totalPages={book.totalPages || book.pages.length}
               />
             </div>
-
-            {/* Key Takeaways Box */}
-            {currentPage.keyTakeaways && currentPage.keyTakeaways.length > 0 && (
-              <div className="mt-8 p-4 rounded-xl bg-indigo-950/30 border border-indigo-500/30 text-xs">
-                <div className="flex items-center gap-1.5 font-semibold text-indigo-300 mb-2">
-                  <Sparkles className="w-4 h-4 text-indigo-400" />
-                  <span>Key Concepts for Exam Review:</span>
-                </div>
-                <ul className="space-y-1.5 list-disc list-inside text-slate-300">
-                  {currentPage.keyTakeaways.map((takeaway, i) => (
-                    <li key={i} className="leading-snug">
-                      {takeaway}
-                    </li>
-                  ))}
-                </ul>
+          ) : (
+            /* Extracted Text View */
+            <div
+              style={{ zoom: `${zoomLevel}%` }}
+              className="w-full max-w-3xl bg-slate-900 border border-slate-800/90 rounded-2xl shadow-2xl p-4 sm:p-6 md:p-8 flex flex-col relative h-fit"
+            >
+              <div className="flex items-center justify-between pb-4 mb-6 border-b border-slate-800 text-[11px] text-slate-400 uppercase tracking-widest font-mono">
+                <span className="truncate max-w-[320px]">{currentPage.chapterTitle || book.title}</span>
+                <span className="text-indigo-400 font-bold">Page {currentPage.pageNumber}</span>
               </div>
-            )}
 
-            {/* Footer */}
-            <div className="mt-8 pt-4 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-500">
-              <span>{book.title} ({book.edition || "Academic Edition"})</span>
-              <span>{book.author || "Academic Textbook"}</span>
+              <div className="prose prose-invert prose-indigo max-w-none text-slate-200 text-sm leading-relaxed space-y-4 whitespace-pre-wrap">
+                {currentPage.content ? (
+                  currentPage.content
+                ) : (
+                  <div className="text-slate-500 italic py-8 text-center">
+                    This page contains visual elements or formatting displayed in the Original PDF view.
+                  </div>
+                )}
+              </div>
+
+              {currentPage.keyTakeaways && currentPage.keyTakeaways.length > 0 && (
+                <div className="mt-8 p-4 rounded-xl bg-indigo-950/30 border border-indigo-500/30 text-xs">
+                  <div className="flex items-center gap-1.5 font-semibold text-indigo-300 mb-2">
+                    <Sparkles className="w-4 h-4 text-indigo-400" />
+                    <span>Key Concepts:</span>
+                  </div>
+                  <ul className="space-y-1.5 list-disc list-inside text-slate-300">
+                    {currentPage.keyTakeaways.map((takeaway, i) => (
+                      <li key={i} className="leading-snug">
+                        {takeaway}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div className="mt-8 pt-4 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-500">
+                <span>{book.title}</span>
+                <span>{book.author || "Academic Textbook"}</span>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
   );
 };
-
-/**
- * Formats markdown-like textbook text into rich HTML with diagrams, styled tables, and code blocks
- */
-function formatTextbookContent(content: string): string {
-  // First preserve code/text blocks
-  const blocks: string[] = [];
-  let processed = content.replace(/```text([\s\S]*?)```/gm, (_, code) => {
-    blocks.push(
-      `<pre class="p-4 bg-slate-950 rounded-xl border border-slate-800 text-indigo-300 font-mono text-[11px] leading-tight overflow-x-auto my-4 shadow-inner">${code.trim()}</pre>`
-    );
-    return `__BLOCK_${blocks.length - 1}__`;
-  });
-
-  // Headings
-  processed = processed
-    .replace(/^## (.*$)/gim, '<h2 class="text-xl font-bold text-slate-100 mt-5 mb-3 tracking-tight border-b border-slate-800/80 pb-2">$1</h2>')
-    .replace(/^### (.*$)/gim, '<h3 class="text-base font-semibold text-indigo-300 mt-4 mb-2">$1</h3>')
-    // Bold & Italics
-    .replace(/\*\*(.*?)\*\*/g, '<strong class="text-slate-100 font-semibold">$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em class="text-slate-300 italic">$1</em>')
-    // Inline code
-    .replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 bg-slate-800 text-indigo-300 rounded font-mono text-xs border border-slate-700/60">$1</code>');
-
-  // Split into lines/paragraphs
-  const lines = processed.split("\n");
-  const result: string[] = [];
-  let inList = false;
-
-  for (let line of lines) {
-    line = line.trim();
-    if (!line) {
-      if (inList) {
-        result.push("</ul>");
-        inList = false;
-      }
-      continue;
-    }
-
-    if (line.startsWith("__BLOCK_")) {
-      if (inList) {
-        result.push("</ul>");
-        inList = false;
-      }
-      result.push(line);
-    } else if (line.startsWith("<h2") || line.startsWith("<h3")) {
-      if (inList) {
-        result.push("</ul>");
-        inList = false;
-      }
-      result.push(line);
-    } else if (/^\d+\.\s/.test(line)) {
-      if (inList) {
-        result.push("</ul>");
-        inList = false;
-      }
-      const itemContent = line.replace(/^\d+\.\s*/, "");
-      result.push(`<div class="flex items-start gap-2.5 my-2 pl-2"><span class="w-5 h-5 rounded-full bg-indigo-600/20 border border-indigo-500/40 text-indigo-300 font-mono text-[10px] flex items-center justify-center shrink-0 mt-0.5 font-bold">${line.match(/^\d+/)?.[0]}</span><div class="text-slate-300 text-xs leading-relaxed flex-1">${itemContent}</div></div>`);
-    } else if (line.startsWith("* ")) {
-      if (!inList) {
-        result.push('<ul class="space-y-1.5 my-2 pl-4 list-disc text-slate-300 text-xs leading-relaxed">');
-        inList = true;
-      }
-      result.push(`<li>${line.slice(2)}</li>`);
-    } else {
-      if (inList) {
-        result.push("</ul>");
-        inList = false;
-      }
-      result.push(`<p class="text-slate-300 text-xs leading-relaxed mb-3">${line}</p>`);
-    }
-  }
-
-  if (inList) {
-    result.push("</ul>");
-  }
-
-  let finalHtml = result.join("\n");
-
-  // Restore code blocks
-  blocks.forEach((block, idx) => {
-    finalHtml = finalHtml.replace(`__BLOCK_${idx}__`, block);
-  });
-
-  // Render KaTeX math formulas
-  return renderMathInText(finalHtml);
-}

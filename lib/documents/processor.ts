@@ -115,77 +115,88 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
     throw new Error("Invalid document format: Missing valid PDF header signature (%PDF-).");
   }
 
-  // 2. Extract text and pages with pdf-parse
-  let pdfData: { numpages: number; text: string; info?: any };
+  // 2. Extract text and pages with pdf-parse using page-level hooks
+  const pageTexts: { pageNum: number; text: string }[] = [];
+  let detectedTotalPages = 1;
+
   try {
     const pdfParse = require("pdf-parse");
-    pdfData = await pdfParse(fileBuffer, {
-      max: 0, // Extract all pages
+    let pageCounter = 0;
+
+    const renderPage = (pageData: any) => {
+      return pageData
+        .getTextContent({ normalizeWhitespace: false, disableCombineTextItems: false })
+        .then((textContent: any) => {
+          pageCounter++;
+          let text = "";
+          for (const item of textContent.items) {
+            text += (item.str || "") + (item.hasEOL ? "\n" : " ");
+          }
+          pageTexts.push({ pageNum: pageCounter, text: text.trim() });
+          return text;
+        });
+    };
+
+    const pdfData = await pdfParse(fileBuffer, {
+      pagerender: renderPage,
+      max: 0,
     });
+
+    detectedTotalPages = Math.max(1, pdfData.numpages || pageTexts.length);
   } catch (err: any) {
     console.error("PDF extraction error:", err);
     throw new Error(`Failed to extract text from PDF: ${err?.message || "Corrupted or encrypted PDF."}`);
   }
 
-  const totalPages = Math.max(1, pdfData.numpages);
+  const totalPages = detectedTotalPages;
   const bookId = `book-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
-  // 3. Page splitting heuristic
-  const rawPageTexts = pdfData.text.split("\f").filter((t: string) => t.trim().length > 0);
+  // 3. Page preservation: 1 database record per physical PDF page (1..totalPages)
   const pages: BookPage[] = [];
   const chapters: Chapter[] = [];
   const allChunks: BookChunk[] = [];
 
-  let currentChapterNum = 1;
-  let currentChapterTitle = "Uncategorized";
-  let currentSectionTitle = "1.1 Content";
-
-  // Check if PDF is a scanned image PDF (minimal or zero extractable text)
+  let currentChapterNum: number | null = null;
+  let currentChapterTitle: string | null = null;
   let totalExtractedLength = 0;
   let emptyPageCount = 0;
 
-  const numPagesToProcess = rawPageTexts.length > 0 ? rawPageTexts.length : Math.min(totalPages, 500);
-
-  for (let i = 0; i < numPagesToProcess; i++) {
-    const pageNum = i + 1;
-    const pageText = (rawPageTexts[i] || "").trim();
+  for (let i = 1; i <= totalPages; i++) {
+    const pageObj = pageTexts.find((p) => p.pageNum === i);
+    const pageText = pageObj ? pageObj.text : "";
     totalExtractedLength += pageText.length;
 
-    if (pageText.length < 50) {
+    if (pageText.length < 30) {
       emptyPageCount++;
     }
 
-    // Detect chapter headings e.g. "Chapter 3: Transport Layer" or "MODULE 2"
+    // Detect real chapter headings if present
     const chapterMatch = pageText.match(/(?:Chapter|CHAPTER|UNIT|MODULE)\s+(\d+)[:\.\s]+([^\n\r]+)/i);
     if (chapterMatch) {
-      currentChapterNum = parseInt(chapterMatch[1], 10) || currentChapterNum + 1;
+      currentChapterNum = parseInt(chapterMatch[1], 10) || (currentChapterNum ? currentChapterNum + 1 : 1);
       currentChapterTitle = `Chapter ${currentChapterNum}: ${chapterMatch[2].trim()}`;
     }
 
+    // Detect section headings if present
     const sectionMatch = pageText.match(/(\d+\.\d+)\s+([^\n\r]+)/);
-    if (sectionMatch) {
-      currentSectionTitle = `${sectionMatch[1]} ${sectionMatch[2].trim()}`;
-    }
+    const sectionTitle = sectionMatch ? `${sectionMatch[1]} ${sectionMatch[2].trim()}` : null;
 
-    const keyTerms = extractKeyTerms(pageText);
-    const keyTakeaways = [
-      keyTerms.length > 0 ? `Key concepts: ${keyTerms.slice(0, 4).join(", ")}.` : "Extracted textbook page.",
-      `Source: ${title} (Page ${pageNum}).`,
-    ];
+    const keyTerms = pageText ? extractKeyTerms(pageText) : [];
+    const keyTakeaways = keyTerms.length > 0 ? [`Key concepts: ${keyTerms.slice(0, 4).join(", ")}.`] : [];
 
     const bookPage: BookPage = {
-      pageNumber: pageNum,
-      chapterId: `ch-${currentChapterNum}`,
+      pageNumber: i,
+      chapterId: currentChapterNum ? `ch-${currentChapterNum}` : null,
       chapterTitle: currentChapterTitle,
-      sectionId: `sec-${pageNum}`,
-      sectionTitle: currentSectionTitle,
-      title: `${currentSectionTitle} (p.${pageNum})`,
-      content: pageText || `[Page ${pageNum} contains visual or graphical elements]`,
+      sectionId: sectionTitle ? `sec-${i}` : null,
+      sectionTitle,
+      title: sectionTitle || (currentChapterTitle ? `${currentChapterTitle} (p.${i})` : `Page ${i}`),
+      content: pageText,
       keyTakeaways,
     };
     pages.push(bookPage);
 
-    // Create intelligent chunks for this page
+    // Create intelligent search chunks for RAG if page has text
     if (pageText.length >= 30) {
       const textChunks = chunkText(pageText);
       for (let c = 0; c < textChunks.length; c++) {
@@ -193,13 +204,13 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
         const chunkTerms = extractKeyTerms(chunkTextContent);
 
         allChunks.push({
-          id: `chunk-${bookId}-${pageNum}-${c + 1}`,
+          id: `chunk-${bookId}-${i}-${c + 1}`,
           bookId,
-          chapterId: `ch-${currentChapterNum}`,
-          chapterTitle: currentChapterTitle,
-          sectionId: `sec-${pageNum}`,
-          sectionTitle: currentSectionTitle,
-          pageNumber: pageNum,
+          chapterId: currentChapterNum ? `ch-${currentChapterNum}` : null,
+          chapterTitle: currentChapterTitle || undefined,
+          sectionId: sectionTitle ? `sec-${i}` : null,
+          sectionTitle: sectionTitle || undefined,
+          pageNumber: i,
           text: chunkTextContent,
           keyTerms: chunkTerms,
         });
@@ -214,26 +225,30 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
 
   if (isScannedPdf) {
     processingStatus = "OCR_REQUIRED";
-    statusMessage = "Document appears to be scanned image PDF. OCR is required to extract full text.";
+    statusMessage = "Your PDF is image-based and requires OCR before AI search can work.";
   } else if (emptyPageCount > 0) {
     processingStatus = "PARTIALLY_INDEXED";
     statusMessage = `Indexed ${pages.length - emptyPageCount} of ${pages.length} pages. Some pages contained only images.`;
   }
 
-  // Build chapter structure
-  chapters.push({
-    id: `ch-${currentChapterNum}`,
-    number: currentChapterNum,
-    title: currentChapterTitle,
-    startPage: 1,
-    endPage: pages.length,
-    sections: pages.slice(0, 10).map((p) => ({
-      id: p.sectionId || `sec-${p.pageNumber}`,
-      number: (p.sectionTitle || "1.1").split(" ")[0] || "1.1",
-      title: p.sectionTitle || p.title || `Section ${p.pageNumber}`,
-      page: p.pageNumber,
-    })),
-  });
+  if (currentChapterTitle && currentChapterNum) {
+    chapters.push({
+      id: `ch-${currentChapterNum}`,
+      number: currentChapterNum,
+      title: currentChapterTitle,
+      startPage: 1,
+      endPage: pages.length,
+      sections: pages
+        .filter((p) => p.sectionTitle)
+        .slice(0, 10)
+        .map((p) => ({
+          id: p.sectionId || `sec-${p.pageNumber}`,
+          number: (p.sectionTitle || "1.1").split(" ")[0] || "1.1",
+          title: p.sectionTitle || `Section ${p.pageNumber}`,
+          page: p.pageNumber,
+        })),
+    });
+  }
 
   const processedBook: Book = {
     id: bookId,
@@ -247,92 +262,104 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
     chunks: allChunks,
   };
 
-  // 4. Secure Storage & Supabase Database Ingestion
+  // 4. Secure Storage & Supabase Database Ingestion (Strict Fail-Closed)
   const supabase = createAdminClient();
-  let storagePath: string | undefined;
+  if (!supabase) {
+    throw new Error("Supabase persistence client unavailable. Cannot complete upload.");
+  }
 
-  if (supabase && userId && !userId.startsWith("demo-")) {
-    try {
-      // 4a. Upload PDF to private bucket under scoped path: textbooks/{userId}/{bookId}/original.pdf
-      const cleanStoragePath = `${userId}/${bookId}/original.pdf`;
-      const { data: uploadData, error: uploadErr } = await supabase.storage
-        .from("textbooks")
-        .upload(cleanStoragePath, fileBuffer, {
-          contentType: mimeType,
-          upsert: true,
-        });
+  const cleanStoragePath = `${userId}/${bookId}/original.pdf`;
 
-      if (!uploadErr && uploadData) {
-        storagePath = uploadData.path;
+  // 4a. Upload original PDF to private storage bucket
+  const { data: uploadData, error: uploadErr } = await supabase.storage
+    .from("textbooks")
+    .upload(cleanStoragePath, fileBuffer, {
+      contentType: mimeType,
+      upsert: true,
+    });
+
+  if (uploadErr || !uploadData) {
+    console.error("Storage upload failed:", uploadErr);
+    throw new Error(`Failed to store PDF document in cloud storage: ${uploadErr?.message || "Storage error"}`);
+  }
+
+  const storagePath = uploadData.path || cleanStoragePath;
+
+  // 4b. Insert Book record into database
+  const { data: bookRecord, error: bookErr } = await supabase
+    .from("books")
+    .insert({
+      user_id: userId,
+      title: processedBook.title,
+      author: processedBook.author,
+      edition: processedBook.edition,
+      subject: processedBook.subject,
+      total_pages: processedBook.totalPages,
+      storage_path: storagePath,
+      file_size_bytes: fileSizeBytes,
+      mime_type: mimeType,
+      status: processingStatus,
+      status_message: statusMessage,
+    })
+    .select("id")
+    .single();
+
+  if (bookErr || !bookRecord) {
+    console.error("Book record insertion failed:", bookErr);
+    throw new Error(`Database error saving textbook metadata: ${bookErr?.message || "Database insert error"}`);
+  }
+
+  const dbBookId = bookRecord.id;
+  processedBook.id = dbBookId;
+
+  // 4c. Ingest book_pages records
+  const pageRecords = pages.map((p) => ({
+    book_id: dbBookId,
+    page_number: p.pageNumber,
+    title: p.title || `Page ${p.pageNumber}`,
+    content: p.content,
+    key_takeaways: p.keyTakeaways || [],
+    equations: p.equations || [],
+  }));
+
+  const PAGE_BATCH_SIZE = 50;
+  for (let i = 0; i < pageRecords.length; i += PAGE_BATCH_SIZE) {
+    const pageBatch = pageRecords.slice(i, i + PAGE_BATCH_SIZE);
+    const { error: pageErr } = await supabase.from("book_pages").upsert(pageBatch, {
+      onConflict: "book_id,page_number",
+    });
+    if (pageErr) {
+      console.error("Page insertion error:", pageErr);
+      throw new Error(`Database error saving page records: ${pageErr.message}`);
+    }
+  }
+
+  // 4d. Ingest all chunks with vector embeddings if text chunks exist
+  if (allChunks.length > 0) {
+    const chunkTexts = allChunks.map((c) => c.text);
+    const embeddings = await generateBatchEmbeddings(chunkTexts, 5);
+
+    const chunkRecords = allChunks.map((chunk, idx) => ({
+      book_id: dbBookId,
+      chunk_index: idx,
+      page_number: chunk.pageNumber,
+      chapter_title: chunk.chapterTitle || null,
+      section_title: chunk.sectionTitle || null,
+      text: chunk.text,
+      key_terms: chunk.keyTerms || [],
+      embedding: `[${(embeddings[idx] || []).join(",")}]`,
+    }));
+
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < chunkRecords.length; i += BATCH_SIZE) {
+      const batch = chunkRecords.slice(i, i + BATCH_SIZE);
+      const { error: chunkErr } = await supabase.from("book_chunks").upsert(batch, {
+        onConflict: "book_id,chunk_index",
+      });
+      if (chunkErr) {
+        console.error("Chunk insertion error:", chunkErr);
+        throw new Error(`Database error saving vector search chunks: ${chunkErr.message}`);
       }
-
-      // 4b. Insert Book record
-      const { data: bookRecord, error: bookErr } = await supabase
-        .from("books")
-        .insert({
-          user_id: userId,
-          title: processedBook.title,
-          author: processedBook.author,
-          edition: processedBook.edition,
-          subject: processedBook.subject,
-          total_pages: processedBook.totalPages,
-          storage_path: storagePath || cleanStoragePath,
-          file_size_bytes: fileSizeBytes,
-          mime_type: mimeType,
-          status: processingStatus,
-          status_message: statusMessage,
-        })
-        .select("id")
-        .single();
-
-      if (!bookErr && bookRecord) {
-        const dbBookId = bookRecord.id;
-        processedBook.id = dbBookId;
-
-        // 4c. Ingest book_pages records into database
-        const pageRecords = pages.map((p) => ({
-          book_id: dbBookId,
-          page_number: p.pageNumber,
-          title: p.title || `Page ${p.pageNumber}`,
-          content: p.content,
-          key_takeaways: p.keyTakeaways || [],
-          equations: p.equations || [],
-        }));
-
-        const PAGE_BATCH_SIZE = 50;
-        for (let i = 0; i < pageRecords.length; i += PAGE_BATCH_SIZE) {
-          const pageBatch = pageRecords.slice(i, i + PAGE_BATCH_SIZE);
-          await supabase.from("book_pages").upsert(pageBatch, {
-            onConflict: "book_id,page_number",
-          });
-        }
-
-        // 4d. Ingest ALL chunks with batch embeddings without arbitrary slice truncation
-        const chunkTexts = allChunks.map((c) => c.text);
-        const embeddings = await generateBatchEmbeddings(chunkTexts, 5);
-
-        const chunkRecords = allChunks.map((chunk, idx) => ({
-          book_id: dbBookId,
-          chunk_index: idx,
-          page_number: chunk.pageNumber,
-          chapter_title: chunk.chapterTitle || null,
-          section_title: chunk.sectionTitle || null,
-          text: chunk.text,
-          key_terms: chunk.keyTerms || [],
-          embedding: `[${(embeddings[idx] || []).join(",")}]`,
-        }));
-
-        // Batch insert in blocks of 50 to avoid Postgres payload limits
-        const BATCH_SIZE = 50;
-        for (let i = 0; i < chunkRecords.length; i += BATCH_SIZE) {
-          const batch = chunkRecords.slice(i, i + BATCH_SIZE);
-          await supabase.from("book_chunks").upsert(batch, {
-            onConflict: "book_id,chunk_index",
-          });
-        }
-      }
-    } catch (dbError) {
-      console.warn("Supabase persistence note (operating with in-memory book data):", dbError);
     }
   }
 

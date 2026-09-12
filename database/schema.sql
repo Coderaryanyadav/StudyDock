@@ -326,12 +326,19 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public, auth
 AS $$
 DECLARE
     current_uid uuid;
 BEGIN
-    current_uid := COALESCE(filter_user_id, auth.uid());
+    -- Authoritative identity: Use auth.uid() when invoked from authenticated context,
+    -- or validate filter_user_id against book ownership
+    current_uid := COALESCE(auth.uid(), filter_user_id);
     
+    IF current_uid IS NULL THEN
+        RAISE EXCEPTION 'Authentication required for vector retrieval';
+    END IF;
+
     RETURN QUERY
     SELECT
         bc.id,
@@ -342,10 +349,10 @@ BEGIN
         bc.section_title,
         bc.text,
         bc.key_terms,
-        1 - (bc.embedding <=> query_embedding) AS similarity
+        (1 - (bc.embedding <=> query_embedding))::float AS similarity
     FROM book_chunks bc
     INNER JOIN books b ON b.id = bc.book_id
-    WHERE (current_uid IS NULL OR b.user_id = current_uid)
+    WHERE b.user_id = current_uid
       AND (filter_book_id IS NULL OR bc.book_id = filter_book_id)
       AND (1 - (bc.embedding <=> query_embedding)) >= match_threshold
     ORDER BY bc.embedding <=> query_embedding

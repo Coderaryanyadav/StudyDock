@@ -242,9 +242,14 @@ export const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({
           {/* TOP RIGHT: Video Lecture Panel */}
           <div
             style={{
-              height: typeof window !== "undefined" && window.innerWidth < 768 ? "100%" : `${topHeight}%`,
+              height:
+                typeof window !== "undefined" && window.innerWidth < 768
+                  ? "100%"
+                  : isVideoCollapsed
+                  ? "44px"
+                  : `${topHeight}%`,
             }}
-            className={`flex flex-col overflow-hidden transition-all duration-75 ${
+            className={`flex flex-col overflow-hidden transition-all duration-150 ${
               mobileTab === "video" ? "flex" : mobileTab === "tutor" ? "hidden md:flex" : "flex"
             }`}
           >
@@ -257,26 +262,35 @@ export const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({
               }}
               onAskAIAboutVideo={handleAskAIAboutVideo}
               onUpdateVideo={onUpdateVideo}
+              isCollapsed={isVideoCollapsed}
+              onToggleCollapse={() => setIsVideoCollapsed(!isVideoCollapsed)}
             />
           </div>
 
           {/* RESIZABLE DIVIDER (Vertical between Video and AI Tutor) */}
-          <div
-            onMouseDown={() => setIsDraggingV(true)}
-            className={`hidden md:flex h-1.5 hover:h-2 bg-slate-900 hover:bg-indigo-500/80 cursor-row-resize items-center justify-center transition-colors group z-20 select-none ${
-              isDraggingV ? "bg-indigo-600 h-2" : ""
-            }`}
-            title="Drag to resize video and tutor panels"
-          >
-            <GripHorizontal className="w-3 h-3 text-slate-600 group-hover:text-white" />
-          </div>
+          {!isVideoCollapsed && (
+            <div
+              onMouseDown={() => setIsDraggingV(true)}
+              className={`hidden md:flex h-1.5 hover:h-2 bg-slate-900 hover:bg-indigo-500/80 cursor-row-resize items-center justify-center transition-colors group z-20 select-none ${
+                isDraggingV ? "bg-indigo-600 h-2" : ""
+              }`}
+              title="Drag to resize video and tutor panels"
+            >
+              <GripHorizontal className="w-3 h-3 text-slate-600 group-hover:text-white" />
+            </div>
+          )}
 
           {/* BOTTOM RIGHT: AI Tutor Panel */}
           <div
             style={{
-              height: typeof window !== "undefined" && window.innerWidth < 768 ? "100%" : `${100 - topHeight}%`,
+              height:
+                typeof window !== "undefined" && window.innerWidth < 768
+                  ? "100%"
+                  : isVideoCollapsed
+                  ? "calc(100% - 44px)"
+                  : `${100 - topHeight}%`,
             }}
-            className={`flex-1 flex flex-col overflow-hidden ${
+            className={`flex-1 flex flex-col overflow-hidden transition-all duration-150 ${
               mobileTab === "tutor" ? "flex" : mobileTab === "video" ? "hidden md:flex" : "flex"
             }`}
           >

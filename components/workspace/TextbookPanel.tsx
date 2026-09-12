@@ -394,7 +394,7 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
         <div
           ref={contentRef}
           onMouseUp={handleMouseUp}
-          className="flex-1 overflow-y-auto p-4 md:p-8 flex justify-center bg-slate-950/60 custom-scrollbar"
+          className="flex-1 overflow-y-auto p-2 sm:p-4 md:p-6 flex justify-center bg-slate-950/60 custom-scrollbar"
         >
           {/* Floating Context Toolbar */}
           <TextbookSelectionToolbar
@@ -407,11 +407,9 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
           {/* Textbook Sheet (Realistic Academic Paper feel) */}
           <div
             style={{
-              transform: `scale(${zoomLevel / 100})`,
-              transformOrigin: "top center",
-              transition: "transform 0.15s ease-out",
+              zoom: `${zoomLevel}%`,
             }}
-            className="w-full max-w-2xl bg-slate-900 border border-slate-800/90 rounded-2xl shadow-2xl shadow-slate-950/80 p-6 md:p-10 flex flex-col relative"
+            className="w-full max-w-3xl bg-slate-900 border border-slate-800/90 rounded-2xl shadow-2xl shadow-slate-950/80 p-4 sm:p-6 md:p-8 flex flex-col relative"
           >
             {/* Textbook Page Header */}
             <div className="flex items-center justify-between pb-4 mb-6 border-b border-slate-800 text-[11px] text-slate-400 uppercase tracking-widest font-mono">

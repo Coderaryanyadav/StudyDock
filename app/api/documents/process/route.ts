@@ -1,15 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Book, BookChunk, BookPage } from "@/types";
+import { processPdfDocument } from "@/lib/documents/processor";
+import { checkRateLimit } from "@/lib/security/rate-limit";
+import { authenticateRequest } from "@/lib/supabase/auth";
 
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
+    // 1. Rate Limiting: Max 10 document processing requests per IP per minute
+    const ip = req.headers.get("x-forwarded-for") || "local-client";
+    const limitCheck = checkRateLimit(`doc-proc-${ip}`, { limit: 10, windowMs: 60 * 1000 });
+    if (!limitCheck.allowed) {
+      return NextResponse.json(
+        { error: "Too many document uploads. Please wait before processing another file." },
+        { status: 429, headers: { "Retry-After": limitCheck.resetInSec.toString() } }
+      );
+    }
+
+    // 2. Authenticate if bearer token / session is present, or assign anonymous guest ID
+    const auth = await authenticateRequest(req);
+    const userId = auth?.id || "guest-user";
+
+    // 3. Extract and Validate Multipart Form Data
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
-    const title = (formData.get("title") as string) || "Custom Uploaded Textbook";
-    const author = (formData.get("author") as string) || "User Document";
-    const subject = (formData.get("subject") as string) || "General Studies";
+    const title = (formData.get("title") as string) || "";
+    const author = (formData.get("author") as string) || "";
+    const subject = (formData.get("subject") as string) || "";
 
     if (!file) {
       return NextResponse.json(
@@ -19,94 +36,52 @@ export async function POST(req: NextRequest) {
     }
 
     // MIME type check
-    const allowedTypes = [
-      "application/pdf",
-      "text/plain",
-      "text/markdown",
-      "application/epub+zip",
-    ];
-    if (!allowedTypes.includes(file.type) && !file.name.endsWith(".pdf") && !file.name.endsWith(".txt")) {
+    const allowedMimes = ["application/pdf", "text/plain", "application/octet-stream"];
+    if (!allowedMimes.includes(file.type) && !file.name.toLowerCase().endsWith(".pdf")) {
       return NextResponse.json(
-        { error: "Unsupported file type. Please upload a PDF or text document." },
+        { error: "Unsupported file type. Please upload a valid PDF document." },
         { status: 400 }
       );
     }
 
-    // File size limit (max 50MB)
-    if (file.size > 50 * 1024 * 1024) {
+    // File size limit: 50MB
+    const MAX_SIZE = 50 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
       return NextResponse.json(
         { error: "File exceeds 50MB limit. Please upload a smaller document." },
         { status: 400 }
       );
     }
 
-    // Simulated chunking and structure generation
-    const samplePages: BookPage[] = [
-      {
-        pageNumber: 1,
-        chapterId: "ch-custom-1",
-        chapterTitle: "Chapter 1: Overview & Fundamentals",
-        sectionId: "sec-custom-1",
-        sectionTitle: "1.1 Document Introduction",
-        title: `1.1 Introduction to ${title}`,
-        content: `## 1.1 Overview\n\nThis document has been parsed and indexed by the AI Study Workspace processing engine.\n\n* File name: \`${file.name}\`\n* File size: ${(file.size / 1024).toFixed(1)} KB\n* Extraction status: **Successfully Chunked & Indexed**\n\nYou can now read, search, select text, and ask your AI Tutor context-aware questions from this document.`,
-        keyTakeaways: [
-          "Document successfully processed into vector-searchable chunks.",
-          "Citations and page numbers mapped for instant lookup.",
-        ],
-      },
-    ];
+    // Convert file to Buffer
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
 
-    const sampleChunks: BookChunk[] = [
-      {
-        id: `chunk-${Date.now()}-1`,
-        bookId: `book-custom-${Date.now()}`,
-        chapterId: "ch-custom-1",
-        chapterTitle: "Chapter 1: Overview & Fundamentals",
-        sectionId: "sec-custom-1",
-        sectionTitle: "1.1 Document Introduction",
-        pageNumber: 1,
-        text: `Overview of uploaded document ${title}. Processed and indexed with high semantic fidelity for AI tutoring and grounded citations.`,
-        keyTerms: [title.toLowerCase(), "introduction", "fundamentals"],
-      },
-    ];
-
-    const processedBook: Book = {
-      id: `book-custom-${Date.now()}`,
-      title,
-      author,
-      edition: "Uploaded Edition",
-      subject,
-      totalPages: samplePages.length,
-      chapters: [
-        {
-          id: "ch-custom-1",
-          number: 1,
-          title: "Chapter 1: Overview & Fundamentals",
-          startPage: 1,
-          endPage: 1,
-          sections: [
-            {
-              id: "sec-custom-1",
-              number: "1.1",
-              title: "1.1 Document Introduction",
-              page: 1,
-            },
-          ],
-        },
-      ],
-      pages: samplePages,
-      chunks: sampleChunks,
-    };
+    // 4. Real PDF Parsing & Vector Indexing Pipeline
+    const processedResult = await processPdfDocument({
+      fileBuffer: buffer,
+      fileName: file.name,
+      fileSizeBytes: file.size,
+      mimeType: file.type || "application/pdf",
+      userId,
+      title: title || file.name.replace(/\.[^/.]+$/, ""),
+      author: author || "Academic Author",
+      subject: subject || "General Studies",
+    });
 
     return NextResponse.json({
       success: true,
-      message: "Document successfully processed and indexed.",
-      book: processedBook,
+      message: `Successfully extracted and indexed ${processedResult.pagesCount} pages and ${processedResult.chunksCount} semantic chunks.`,
+      book: processedResult.book,
+      stats: {
+        pages: processedResult.pagesCount,
+        chunks: processedResult.chunksCount,
+      },
     });
   } catch (error: any) {
+    console.error("Document processing API error:", error);
     return NextResponse.json(
-      { error: "Document processing failed", details: error?.message },
+      { error: "Document processing failed. Please verify that the PDF is not password-protected and try again." },
       { status: 500 }
     );
   }

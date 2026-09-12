@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   BookOpen,
   LayoutDashboard,
@@ -12,9 +12,11 @@ import {
   HelpCircle,
   Home,
   ChevronRight,
-  RotateCcw,
+  User,
+  LogOut,
 } from "lucide-react";
 import { Book } from "@/types";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 interface WorkspaceNavbarProps {
   currentView: "workspace" | "dashboard" | "landing";
@@ -26,6 +28,7 @@ interface WorkspaceNavbarProps {
   onOpenQuizModal: () => void;
   onOpenFlashcardsModal: () => void;
   onOpenCommandPalette: () => void;
+  onOpenAuthModal: () => void;
   onResetDemo: () => void;
 }
 
@@ -39,9 +42,38 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
   onOpenQuizModal,
   onOpenFlashcardsModal,
   onOpenCommandPalette,
+  onOpenAuthModal,
   onResetDemo,
 }) => {
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const activePageObj = activeBook.pages.find((p) => p.pageNumber === activePageNumber);
+
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+    if (supabase) {
+      supabase.auth.getSession().then(({ data }) => {
+        if (data.session?.user?.email) {
+          setUserEmail(data.session.user.email);
+        }
+      });
+
+      const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
+        setUserEmail(session?.user?.email || null);
+      });
+
+      return () => {
+        authListener.subscription.unsubscribe();
+      };
+    }
+  }, []);
+
+  const handleSignOut = async () => {
+    const supabase = getSupabaseBrowserClient();
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+    setUserEmail(null);
+  };
 
   return (
     <header className="h-14 bg-slate-900 border-b border-slate-800 px-3 md:px-5 flex items-center justify-between z-30 shrink-0 select-none">
@@ -121,7 +153,7 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
         </button>
       </div>
 
-      {/* Right: Quick Tools & Modals */}
+      {/* Right: Quick Tools, Auth & Modals */}
       <div className="flex items-center gap-1.5 md:gap-2">
         <button
           onClick={onOpenCommandPalette}
@@ -167,6 +199,34 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
         >
           <Keyboard className="w-4 h-4" />
         </button>
+
+        {/* Auth / Account Button */}
+        {userEmail ? (
+          <div className="flex items-center gap-1.5 pl-1">
+            <div
+              className="flex items-center gap-1.5 px-2 py-1 rounded-xl bg-indigo-950/60 border border-indigo-500/30 text-indigo-300 text-xs font-medium"
+              title={userEmail}
+            >
+              <User className="w-3.5 h-3.5" />
+              <span className="hidden xl:inline max-w-[100px] truncate">{userEmail.split("@")[0]}</span>
+            </div>
+            <button
+              onClick={handleSignOut}
+              className="p-1.5 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-rose-400 transition-colors"
+              title="Sign Out"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={onOpenAuthModal}
+            className="flex items-center gap-1 px-3 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition-colors"
+          >
+            <User className="w-3.5 h-3.5" />
+            <span>Sign In</span>
+          </button>
+        )}
       </div>
     </header>
   );

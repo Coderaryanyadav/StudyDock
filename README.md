@@ -1,100 +1,147 @@
-# AI Study Workspace
+# STUDYDOCK — Production AI Academic Study Workspace
 
 > **"Read it. Watch it. Ask it. Understand it."**
 >
-> A production-grade digital study environment where students can study from a textbook, watch synchronized YouTube lectures, and interact with a context-aware AI academic tutor — all on a single unified screen.
+> A production-grade multi-modal study platform where students read verified textbooks, watch synchronized lectures, and interact with a context-aware AI tutor with grounded citations — all on a single unified screen.
 
 ---
 
-## 🌟 Product Vision & Architecture
+## 🏛️ System Architecture
 
-The **AI Study Workspace** eliminates app-switching fatigue for university students by combining:
-1. **Digital Textbook Reader (Left Panel)**: High-fidelity reading canvas, table of contents drawer, bookmarks, zoom controls (50%–175%), search in document, annotation highlights, and floating text-selection action toolbar (`[Explain]`, `[Simplify]`, `[Example]`, `[Ask AI]`, `[Card]`, `[Quiz]`).
-2. **YouTube Lecture Player (Top-Right Panel)**: Responsive 16:9 embedded player with timestamp tracking, "Connect Lecture" mapping, synchronized chapter markers, and direct textbook cross-links.
-3. **AI Academic Tutor (Bottom-Right Panel)**: Context-aware academic tutor with streaming responses, KaTeX math notation ($x$, $$y$$), syntax-highlighted code blocks, grounded clickable citations that jump directly to textbook pages, 10 academic learning modes, and suggested follow-up chips.
-4. **Study Dashboard**: Concept mastery tracking matrix (e.g. TCP 90%, UDP 80%, Subnetting 40%), personalized review recommendations, today's study plan checklist, study streaks, and interactive quizzes/flashcards.
-
----
-
-## 🚀 Key Features
-
-* **3-Panel Resizable Desktop Workspace**: Smooth draggable dividers (horizontal & vertical) with localStorage layout persistence and collapsible panels.
-* **Mobile & Tablet Responsive Layout**: Automatic tabbed navigation (`📚 Textbook`, `🎥 Video`, `🤖 Tutor`) on smaller screens with smooth state preservation.
-* **Text Selection Context Toolbar**: Select any text in the textbook to trigger contextual actions (`Explain`, `Simplify`, `Example`, `Ask AI`, `Flashcard`, `Quiz`).
-* **10 Academic Learning Modes**:
-  * ✨ **Explain**: Balanced conceptual breakdown
-  * 👶 **Beginner**: Intuitive real-life analogies with zero technical jargon
-  * 🔬 **Deep Dive**: Rigorous RFC-level mechanics and mathematical proofs
-  * 🧪 **Example**: Concrete packet traces, code, and Wireshark captures
-  * ❓ **Quiz**: Contextual check questions strictly from the current textbook page
-  * 🎓 **Exam Mode**: High-yield exam questions and scoring criteria
-  * 📇 **Flashcards**: Front/back key concept prompt cards
-  * 📝 **Summary**: Executive revision notes and top 3 exam takeaways
-  * 🧭 **Teach Me**: Step-by-step 4-stage interactive lecture
-  * 🧠 **Socratic Mode**: Guiding questions to stimulate critical thinking
-* **Grounded RAG Engine**: Retrieves relevant chunks and guarantees verified textbook citations (**Source: [Book Title] — Page [X]**). Clicking a citation immediately highlights and navigates to the textbook page.
-* **Zero-Setup Out-of-the-Box Demo**: Preloaded with *Computer Networking: Principles & Protocols (Chapter 3: Transport Layer & TCP 3-Way Handshake)*, Stanford lecture sync, concept mastery scores, interactive quiz questions, and flashcards.
-
----
-
-## 🛠️ Tech Stack
-
-* **Framework**: Next.js 14+ (App Router)
-* **Frontend**: React 18, TypeScript, Tailwind CSS, Lucide Icons, Framer Motion
-* **Math & Typography**: KaTeX, Google Fonts (Inter, Merriweather, JetBrains Mono)
-* **AI & RAG**: Google Generative AI (`@google/generative-ai`) with intelligent zero-config contextual fallback engine
-* **Video**: Official YouTube IFrame Embed API
-* **Confetti**: Canvas-Confetti for mastery completion
-
----
-
-## ⚡ Getting Started Locally
-
-### 1. Clone & Install Dependencies
-
-```bash
-cd /path/to/LearnAi
-npm install
+```text
+                               STUDYDOCK
+                                   │
+                     ┌─────────────┴─────────────┐
+                     │                           │
+                  FRONTEND                    BACKEND
+                     │                           │
+             ┌───────┼────────┐         ┌────────┼────────┐
+             │       │        │         │        │        │
+         Textbook  Video    Tutor      Auth    Documents  AI/RAG
+             │       │        │         │        │        │
+             └───────┼────────┘         │        │        │
+                     │                  │        │        │
+                     └──── Context ─────┴────────┴────────┘
+                               │
+                               ▼
+                          RAG ENGINE
+                               │
+                   ┌───────────┼───────────┐
+                   ▼           ▼           ▼
+              PostgreSQL    pgvector    Storage
+             (Supabase)   (Embeddings) (Private)
 ```
 
-### 2. Configure Environment Variables (Optional)
+---
 
-Create `.env.local` based on `.env.example`:
+## 🚀 Key Production Capabilities
+
+1. **Real PDF Document Processing Pipeline**:
+   - Signature header verification (`%PDF-`).
+   - Real page extraction with `pdf-parse`.
+   - Intelligent sliding-window chunking preserving sentence boundaries and overlapping context.
+   - Chapter & section hierarchy extraction via regex heuristics.
+   - Vector embeddings generated using Gemini `text-embedding-004` (768 dimensions).
+   - Automated private storage bucket upload with user isolation.
+
+2. **Real Vector & Hybrid RAG Retrieval**:
+   - `pgvector` HNSW vector similarity search (`match_book_chunks` RPC).
+   - Multi-factor reranker combining semantic cosine similarity, keyword frequency, current page proximity boost (+0.3), and highlighted text match bonus (+0.5).
+   - Verifiable, grounded citations referencing real stored chunks.
+
+3. **Grounded AI Academic Tutor**:
+   - Streaming response delivery via Server-Sent Events (SSE).
+   - KaTeX LaTeX math formula rendering (`$formula$` and `$$formula$$`).
+   - 10 Pedagogical learning modes (`Explain`, `Beginner`, `Deep Dive`, `Example`, `Quiz`, `Exam Mode`, `Flashcards`, `Summary`, `Teach Me`, `Socratic`).
+   - Clickable citation tags that instantly navigate to and highlight source pages.
+
+4. **Security & Prompt Defense Architecture**:
+   - XML tag delimiter boundary protection against prompt injection attempts.
+   - Strict Row Level Security (RLS) policies on all tables (`users`, `books`, `book_pages`, `book_chunks`, `conversations`, `messages`, `study_sessions`).
+   - In-memory token-bucket rate limiters on AI chat, PDF processing, quizzes, and flashcards.
+   - Safe error masking without leaking server internals.
+
+5. **3-Panel Desktop Workspace & Synchronized Lecture Player**:
+   - Draggable horizontal and vertical dividers with localStorage dimension persistence.
+   - Mini-player collapsible mode (`[—] Minimize Video`) allowing flexible workspace organization.
+   - Text selection floating toolbar with instant AI actions.
+   - Out-of-the-box offline demo mode when unconfigured, seamlessly upgrading to cloud Supabase + Gemini when keys are provided.
+
+---
+
+## 🛠️ Database Setup (Supabase PostgreSQL + pgvector)
+
+1. Create a project on [Supabase](https://supabase.com).
+2. Go to the **SQL Editor** in your Supabase dashboard.
+3. Open [`database/schema.sql`](./database/schema.sql) and execute the entire script.
+4. The schema will automatically:
+   - Enable the `vector` extension.
+   - Create tables: `users`, `books`, `book_pages`, `book_chunks`, `chapters`, `sections`, `videos`, `video_segments`, `book_video_links`, `conversations`, `messages`, `highlights`, `notes`, `flashcards`, `quizzes`, `quiz_questions`, `quiz_attempts`, `concepts`, `student_concepts`, `study_sessions`.
+   - Create HNSW cosine similarity index `idx_book_chunks_embedding`.
+   - Create the `match_book_chunks(...)` RPC function.
+   - Configure Row Level Security (RLS) policies.
+
+---
+
+## ⚡ Environment Variables
+
+Copy `.env.example` to `.env.local`:
 
 ```bash
-# Optional: Provide your Gemini API key for live custom textbook generation
-# Get a free key at: https://aistudio.google.com/app/apikey
+cp .env.example .env.local
+```
+
+Fill in your credentials:
+
+```ini
+# Google Gemini AI (Required for AI Tutor & text-embedding-004)
 GEMINI_API_KEY=your_gemini_api_key_here
 
+# Supabase PostgreSQL & pgvector (Required for Cloud Database, Auth & Vector RAG)
+NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
 # Optional: YouTube Data API v3
-YOUTUBE_API_KEY=
+YOUTUBE_API_KEY=your_youtube_api_key_here
 ```
 
-*(Note: If no API key is provided, the workspace automatically operates with its high-accuracy contextual simulation engine).*
+---
 
-### 3. Run Development Server
+## 💻 Local Development & Build
 
 ```bash
+# 1. Install dependencies
+npm install
+
+# 2. Run local development server
 npm run dev
-```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+# 3. Lint check
+npm run lint
 
-### 4. Production Build & Test
-
-```bash
+# 4. Production build
 npm run build
+
+# 5. Start production server
 npm run start
 ```
 
 ---
 
-## ⌨️ Keyboard Shortcuts
+## ⌨️ Global Keyboard Shortcuts
 
-| Shortcut | Description |
+| Shortcut | Action |
 | :--- | :--- |
-| `←` / `→` | Navigate to Previous / Next textbook page |
+| `←` / `→` | Previous / Next textbook page |
+| `Cmd/Ctrl + K` | Search Workspace / Command Palette |
 | `Cmd/Ctrl + D` | Toggle between Workspace and Study Dashboard |
-| `?` | Open Keyboard Shortcuts help modal |
-| `Enter` | Send message in AI Tutor |
-| `Shift + Enter` | Insert newline in AI Tutor |
+| `?` | Keyboard Shortcuts help modal |
+| `Enter` | Send prompt to AI Academic Tutor |
+| `Shift + Enter` | Insert newline in tutor prompt |
+
+---
+
+## 📜 License
+
+MIT License. Educational and academic study tool.

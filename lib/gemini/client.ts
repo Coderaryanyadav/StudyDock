@@ -1,7 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { LearningMode } from "@/types";
 import { LEARNING_MODES } from "@/lib/learning-modes";
-import { RagContext, formatPromptForAI } from "@/lib/rag/engine";
+import { ProductionRagContext, buildProductionPrompt } from "@/lib/rag/retriever";
+import { RagContext } from "@/lib/rag/engine";
 
 export interface StreamCallbacks {
   onChunk: (text: string) => void;
@@ -9,32 +10,30 @@ export interface StreamCallbacks {
   onError: (error: Error) => void;
 }
 
-const SYSTEM_INSTRUCTION = `
-You are the AI Academic Tutor in the "AI Study Workspace" platform for university students.
+const SYSTEM_INSTRUCTION = `You are the StudyDock AI Academic Tutor in the "AI Study Workspace" platform for university students.
 Your mission is: "Read it. Watch it. Ask it. Understand it."
 
 You are context-aware: you know what textbook page, chapter, section, and video timestamp the student is currently studying.
 
 Key Responsibilities:
 1. Academic Rigor: Deliver precise, clear, and pedagogically sound explanations.
-2. Grounded Truth: Rely strictly on the student's textbook materials and citations. Never fabricate page numbers.
+2. Grounded Truth: Rely strictly on the student's textbook materials and citations. Never fabricate page numbers or source chapters.
 3. If information is missing from the textbook, explicitly state: "I couldn't find this in the current textbook material, but I can explain it using general knowledge."
 4. Format math using standard KaTeX syntax ($x$, $$y$$) and code in markdown code blocks.
 5. End with a bold citation: **Source: [Book Title] — Page [X]**.
 `;
 
 /**
- * Intelligent fallback generator when GEMINI_API_KEY is not configured,
- * ensuring the workspace is 100% operational out of the box with zero runtime errors.
+ * Intelligent contextual response generator when GEMINI_API_KEY is not configured
  */
 function generateContextualMockResponse(
   question: string,
-  context: RagContext,
+  context: ProductionRagContext | RagContext,
   mode: LearningMode
 ): string {
   const qLower = question.toLowerCase();
   const page = context.activePageNumber;
-  const bookTitle = context.activeBook.title;
+  const bookTitle = context.activeBook?.title || "Computer Networking: A Top-Down Approach";
 
   if (context.selectedText) {
     if (mode === "beginner") {
@@ -85,7 +84,13 @@ In Section **${context.relevantChunks[0]?.sectionTitle || "3.3"}**, this concept
   }
 
   // Handle specific question patterns
-  if (qLower.includes("three") || qLower.includes("handshake") || qLower.includes("syn") || qLower.includes("why 3") || qLower.includes("three messages")) {
+  if (
+    qLower.includes("three") ||
+    qLower.includes("handshake") ||
+    qLower.includes("syn") ||
+    qLower.includes("why 3") ||
+    qLower.includes("three messages")
+  ) {
     if (mode === "beginner") {
       return `### 🤝 Why TCP Needs 3 Messages (Simple Analogy)
 
@@ -96,7 +101,7 @@ Think of it like two people agreeing on a secret code before sharing private not
 3. **Step 3 (Client):** "Got your 500! We are both ready." (*ACK*)
 
 #### Why wouldn't 2 messages work?
-If only 2 messages were used, an old message delayed in the mail could arrive months later at the server. The server would think you want to talk right now and sit waiting forever (*a phantom connection*). The 3rd message confirms that the client is actually still alive and ready.
+If only 2 messages were used, an old message delayed in the network could arrive months later at the server. The server would think you want to talk right now and sit waiting forever (*a phantom connection*). The 3rd message confirms that the client is actually still alive and ready.
 
 **Source: ${bookTitle} — Page 72**`;
     }
@@ -175,26 +180,6 @@ $$\\text{Usable Hosts} = 2^{32 - x} - 2$$
 **Source: ${bookTitle} — Page 76**`;
   }
 
-  if (qLower.includes("quiz") || mode === "quiz") {
-    return `### 📝 Quick Knowledge Check (Page ${page})
-
-Let's test your understanding of Section **${context.relevantChunks[0]?.sectionTitle || "Transport Layer"}**:
-
-**Question 1:**
-During the TCP 3-way handshake, if a client sends a SYN with sequence number \`seq = 4500\`, what should the server's SYN-ACK packet contain for its ACK field?
-* A) \`ack = 4500\`
-* B) \`ack = 4501\`
-* C) \`ack = 0\`
-* D) \`ack = 4502\`
-
-**Question 2:**
-What is the primary role of the TCP persistence timer when $rwnd = 0$?
-
-*Reply with your answers to check your score!*
-
-**Source: ${bookTitle} — Page ${page}**`;
-  }
-
   // General grounded response
   return `### 📚 Overview of ${context.relevantChunks[0]?.sectionTitle || "Transport Layer Services"}
 
@@ -210,11 +195,11 @@ ${context.relevantChunks[0]?.text || "The transport layer provides logical commu
 }
 
 /**
- * Stream tutor responses using Gemini API with intelligent mock fallback
+ * Stream tutor responses using Gemini 1.5 Flash API with intelligent grounded fallback
  */
 export async function streamTutorResponse(
   question: string,
-  context: RagContext,
+  context: ProductionRagContext | RagContext,
   mode: LearningMode = "explain",
   callbacks: StreamCallbacks
 ): Promise<void> {
@@ -222,7 +207,7 @@ export async function streamTutorResponse(
   const modeConfig = LEARNING_MODES[mode] || LEARNING_MODES.explain;
 
   if (!apiKey || apiKey.trim() === "" || apiKey === "your_gemini_api_key_here") {
-    // Zero-config intelligent fallback simulation with real typing delay
+    // Contextual mock generator with realistic word-by-word streaming
     const mockResponse = generateContextualMockResponse(question, context, mode);
     const words = mockResponse.split(" ");
     let currentText = "";
@@ -230,7 +215,6 @@ export async function streamTutorResponse(
     for (let i = 0; i < words.length; i++) {
       currentText += (i === 0 ? "" : " ") + words[i];
       callbacks.onChunk(currentText);
-      // Realistic streaming typing pace
       await new Promise((resolve) => setTimeout(resolve, 20 + Math.random() * 25));
     }
 
@@ -245,7 +229,7 @@ export async function streamTutorResponse(
       systemInstruction: SYSTEM_INSTRUCTION,
     });
 
-    const prompt = formatPromptForAI(question, context, modeConfig.promptModifier);
+    const prompt = buildProductionPrompt(question, context as ProductionRagContext, modeConfig.promptModifier);
     const result = await model.generateContentStream(prompt);
 
     let fullText = "";

@@ -13,6 +13,7 @@ import { ShortcutsModal } from "@/components/modals/ShortcutsModal";
 import { DocumentUploadModal } from "@/components/modals/DocumentUploadModal";
 import { OnboardingModal } from "@/components/modals/OnboardingModal";
 import { CommandPaletteModal } from "@/components/modals/CommandPaletteModal";
+import { AuthModal } from "@/components/auth/AuthModal";
 import { safeLocalStorageGet, safeLocalStorageSet } from "@/lib/utils";
 
 export default function Home() {
@@ -29,6 +30,7 @@ export default function Home() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState<boolean>(false);
   const [isOnboardingModalOpen, setIsOnboardingModalOpen] = useState<boolean>(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
 
   // Target citation page jump tracker
   const [targetCitationPage, setTargetCitationPage] = useState<number | null>(null);
@@ -55,9 +57,9 @@ export default function Home() {
 
       // Arrow navigation
       if (e.key === "ArrowLeft") {
-        setActivePageNumber((prev) => Math.max(70, prev - 1));
+        setActivePageNumber((prev) => Math.max(1, prev - 1));
       } else if (e.key === "ArrowRight") {
-        setActivePageNumber((prev) => Math.min(76, prev + 1));
+        setActivePageNumber((prev) => Math.min(activeBook.totalPages || 100, prev + 1));
       } else if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
         setIsCommandPaletteOpen((prev) => !prev);
@@ -71,7 +73,7 @@ export default function Home() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [activeBook.totalPages]);
 
   const handleDocumentUploaded = (newBook: Book) => {
     setActiveBook(newBook);
@@ -107,6 +109,7 @@ export default function Home() {
         onOpenQuizModal={() => setIsQuizModalOpen(true)}
         onOpenFlashcardsModal={() => setIsFlashcardsModalOpen(true)}
         onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
         onResetDemo={() => {
           setActiveBook(DEMO_BOOK);
           setActivePageNumber(72);
@@ -164,6 +167,11 @@ export default function Home() {
       />
 
       {/* Interactive Modals */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+      />
+
       <QuizModal
         isOpen={isQuizModalOpen}
         onClose={() => setIsQuizModalOpen(false)}

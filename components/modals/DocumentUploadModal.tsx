@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { X, Upload, FileText, CheckCircle2, AlertCircle, Sparkles, Loader2 } from "lucide-react";
+import { X, Upload, FileText, CheckCircle2, AlertCircle, Sparkles, Loader2, Database, Cpu } from "lucide-react";
 import { Book } from "@/types";
 
 interface DocumentUploadModalProps {
@@ -16,10 +16,11 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   onDocumentUploaded,
 }) => {
   const [file, setFile] = useState<File | null>(null);
-  const [title, setTitle] = useState<string>("");
-  const [author, setAuthor] = useState<string>("");
-  const [subject, setSubject] = useState<string>("Computer Science");
+  const [title, setTitle] = useState<string>("Operating Systems: Three Easy Pieces");
+  const [author, setAuthor] = useState<string>("Remzi & Andrea Arpaci-Dusseau");
+  const [subject, setSubject] = useState<string>("Computer Systems");
   const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [processStep, setProcessStep] = useState<"idle" | "uploading" | "extracting" | "indexing" | "ready">("idle");
   const [error, setError] = useState<string>("");
 
   if (!isOpen) return null;
@@ -28,7 +29,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
     if (e.target.files && e.target.files[0]) {
       const selected = e.target.files[0];
       setFile(selected);
-      if (!title) {
+      if (!title || title === "Operating Systems: Three Easy Pieces") {
         setTitle(selected.name.replace(/\.[^/.]+$/, ""));
       }
     }
@@ -42,6 +43,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
     }
 
     setIsUploading(true);
+    setProcessStep("uploading");
     setError("");
 
     try {
@@ -50,6 +52,15 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
       formData.append("title", title || file.name);
       formData.append("author", author || "Academic Author");
       formData.append("subject", subject);
+
+      // Transition step indicators
+      setTimeout(() => {
+        setProcessStep("extracting");
+      }, 500);
+
+      setTimeout(() => {
+        setProcessStep("indexing");
+      }, 1200);
 
       const res = await fetch("/api/documents/process", {
         method: "POST",
@@ -61,10 +72,14 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
         throw new Error(data.error || "Failed to process document.");
       }
 
-      onDocumentUploaded(data.book);
-      onClose();
+      setProcessStep("ready");
+      setTimeout(() => {
+        onDocumentUploaded(data.book);
+        onClose();
+      }, 700);
     } catch (err: any) {
       setError(err?.message || "Failed to process and index document.");
+      setProcessStep("idle");
     } finally {
       setIsUploading(false);
     }
@@ -79,8 +94,8 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
               <Upload className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-white">Upload Textbook / Notes</h3>
-              <p className="text-xs text-slate-400">PDF documents you have permission to study with</p>
+              <h3 className="font-bold text-base text-white">Upload Textbook / Document</h3>
+              <p className="text-xs text-slate-400">PDF documents with real text extraction & RAG indexing</p>
             </div>
           </div>
           <button
@@ -98,7 +113,8 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
               type="file"
               accept=".pdf,.txt,.md"
               onChange={handleFileChange}
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              disabled={isUploading}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
             />
             <div className="space-y-2 flex flex-col items-center">
               <FileText className="w-8 h-8 text-indigo-400" />
@@ -122,7 +138,8 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="e.g. Distributed Systems"
                 required
-                className="w-full bg-slate-950 text-xs px-3 py-2 rounded-xl border border-slate-800 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                disabled={isUploading}
+                className="w-full bg-slate-950 text-xs px-3 py-2 rounded-xl border border-slate-800 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
               />
             </div>
 
@@ -136,7 +153,8 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
                 onChange={(e) => setSubject(e.target.value)}
                 placeholder="e.g. Computer Science"
                 required
-                className="w-full bg-slate-950 text-xs px-3 py-2 rounded-xl border border-slate-800 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                disabled={isUploading}
+                className="w-full bg-slate-950 text-xs px-3 py-2 rounded-xl border border-slate-800 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
               />
             </div>
           </div>
@@ -148,21 +166,55 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
             </div>
           )}
 
-          <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-[11px] text-slate-400 space-y-1">
-            <div className="font-semibold text-slate-300 flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-              Automatic RAG Chunking & Citation Indexing
+          {/* Progressive Indexing Pipeline Status */}
+          {isUploading && (
+            <div className="p-3 bg-indigo-950/40 rounded-xl border border-indigo-500/30 text-xs text-indigo-200 space-y-2">
+              <div className="flex items-center justify-between font-semibold">
+                <span className="flex items-center gap-1.5">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                  {processStep === "uploading" && "Uploading document stream..."}
+                  {processStep === "extracting" && "Extracting pages & detecting chapters..."}
+                  {processStep === "indexing" && "Generating semantic vector chunks (pgvector)..."}
+                  {processStep === "ready" && "Document verified & ready for study!"}
+                </span>
+                <span className="text-[10px] font-mono text-indigo-400 uppercase tracking-wider">
+                  Pipeline Active
+                </span>
+              </div>
+              <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden">
+                <div
+                  className={`h-full bg-gradient-to-r from-indigo-500 to-cyan-400 transition-all duration-500 ${
+                    processStep === "uploading"
+                      ? "w-1/4"
+                      : processStep === "extracting"
+                      ? "w-2/3"
+                      : processStep === "indexing"
+                      ? "w-5/6"
+                      : "w-full"
+                  }`}
+                />
+              </div>
             </div>
-            <p>
-              Your document will be automatically chunked by page and section with full citation preservation.
-            </p>
-          </div>
+          )}
+
+          {!isUploading && (
+            <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-[11px] text-slate-400 space-y-1">
+              <div className="font-semibold text-slate-300 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                Real Text Extraction & pgvector Chunking
+              </div>
+              <p>
+                Your PDF will be parsed with sentence boundaries preserved, sections extracted, and indexed with embeddings for precise grounded citations.
+              </p>
+            </div>
+          )}
 
           <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+              disabled={isUploading}
+              className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
@@ -174,12 +226,12 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
               {isUploading ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Processing & Chunking...</span>
+                  <span>Processing...</span>
                 </>
               ) : (
                 <>
                   <Upload className="w-3.5 h-3.5" />
-                  <span>Index Document</span>
+                  <span>Process & Study</span>
                 </>
               )}
             </button>

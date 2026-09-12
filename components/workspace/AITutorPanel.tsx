@@ -145,6 +145,7 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
           learningMode: currentMode,
           videoTimestampSeconds: 240,
           bookId: book.id,
+          customBook: book,
         }),
       });
 

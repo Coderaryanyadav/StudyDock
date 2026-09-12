@@ -117,6 +117,12 @@ export interface VideoTopic {
   summary: string;
 }
 
+export interface VideoTranscriptSegment {
+  timestampSeconds: number;
+  formattedTime: string;
+  text: string;
+}
+
 export interface VideoLecture {
   id: string;
   title: string;
@@ -126,15 +132,20 @@ export interface VideoLecture {
   formattedDuration: string;
   bookId?: string;
   topics?: VideoTopic[];
+  transcript?: VideoTranscriptSegment[];
+  transcriptUnavailable?: boolean;
 }
 
 export interface Citation {
   id: string;
+  sourceType?: "textbook" | "youtube";
   bookId: string;
   bookTitle: string;
   chapter: string;
   section: string;
-  pageNumber: number;
+  pageNumber?: number;
+  videoTimestampSeconds?: number;
+  videoFormattedTime?: string;
   excerpt: string;
 }
 

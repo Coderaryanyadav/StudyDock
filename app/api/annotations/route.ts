@@ -14,11 +14,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: true, highlights: [], bookmarks: [] });
     }
 
-    if (!bookId.startsWith("demo-")) {
-      const isOwner = await verifyBookOwnership(userId, bookId);
-      if (!isOwner) {
-        return NextResponse.json({ error: "Access denied." }, { status: 403 });
-      }
+    const isOwner = await verifyBookOwnership(userId, bookId);
+    if (!isOwner) {
+      return NextResponse.json({ error: "Access denied." }, { status: 403 });
     }
 
     const supabase = (await createServerSupabaseClient()) || createAdminClient();

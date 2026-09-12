@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Book, LearningMode, VideoLecture, VideoTopic } from "@/types";
+import { Book, LearningMode, VideoLecture, VideoTopic, VideoTranscriptSegment } from "@/types";
 import { TextbookPanel } from "./TextbookPanel";
 import { VideoPanel } from "./VideoPanel";
 import { AITutorPanel } from "./AITutorPanel";
@@ -13,7 +13,7 @@ interface WorkspaceLayoutProps {
   activePageNumber: number;
   onPageChange: (page: number) => void;
   video: VideoLecture | null;
-  onUpdateVideo: (video: VideoLecture) => void;
+  onUpdateVideo: (video: VideoLecture | null) => void;
   targetCitationPage?: number | null;
   onClearTargetCitation?: () => void;
   onLaunchQuiz: () => void;
@@ -33,14 +33,14 @@ export const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({
 }) => {
   // Panel dimensions (% based)
   const [leftWidth, setLeftWidth] = useState<number>(50);
-  const [topHeight, setTopHeight] = useState<number>(46);
+  const [topHeight, setTopHeight] = useState<number>(44);
   const [isMounted, setIsMounted] = useState<boolean>(false);
 
   // Load persisted dimensions after mounting on client
   useEffect(() => {
     setIsMounted(true);
     const savedLeft = safeLocalStorageGet("workspace_left_width", 50);
-    const savedTop = safeLocalStorageGet("workspace_top_height", 46);
+    const savedTop = safeLocalStorageGet("workspace_top_height", 44);
     setLeftWidth(savedLeft);
     setTopHeight(savedTop);
   }, []);
@@ -49,9 +49,8 @@ export const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({
   const [mobileTab, setMobileTab] = useState<"textbook" | "video" | "tutor">("textbook");
 
   // Panel collapsed states
-  const [isTextbookCollapsed, setIsTextbookCollapsed] = useState<boolean>(false);
   const [isVideoCollapsed, setIsVideoCollapsed] = useState<boolean>(false);
-  const [isTutorCollapsed, setIsTutorCollapsed] = useState<boolean>(false);
+  const [videoSeekTimestamp, setVideoSeekTimestamp] = useState<number | null>(null);
 
   // External prompt bridge for AI Tutor
   const [externalPrompt, setExternalPrompt] = useState<{
@@ -143,67 +142,84 @@ export const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({
     setMobileTab("tutor");
   };
 
-  const handleAskAIAboutVideo = (topic: VideoTopic) => {
+  const handleAskAIAboutVideo = (item: VideoTopic | VideoTranscriptSegment) => {
+    const isTopic = "title" in item;
+    const promptText = isTopic
+      ? `In the lecture at ${item.formattedTime}, the instructor covers "${item.title}". How does this connect to what we read in the textbook on page ${item.pageNumber}?`
+      : `In the lecture at timestamp ${item.formattedTime}, the instructor says: "${item.text}". Please explain how this concept relates to our current study material.`;
+
     setExternalPrompt({
-      text: `In the lecture at ${topic.formattedTime}, the instructor covers "${topic.title}". How does this connect to what we read in the textbook on page ${topic.pageNumber}?`,
+      text: promptText,
       mode: "explain",
     });
+
+    if (isTopic) {
+      onPageChange(item.pageNumber);
+    }
     setMobileTab("tutor");
   };
 
+  const handleSeekVideoTimestamp = (seconds: number) => {
+    setVideoSeekTimestamp(seconds);
+    if (mobileTab !== "video") {
+      // Keep mobile user in context or notify
+    }
+  };
+
   return (
-    <div className="flex-1 flex flex-col h-[calc(100vh-3.5rem)] overflow-hidden bg-slate-950">
-      {/* Mobile Tab Navigation (< md screens) */}
-      <div className="md:hidden flex items-center justify-around bg-slate-900 border-b border-slate-800 py-1.5 px-2 shrink-0 z-20">
+    <div className="flex-1 flex flex-col overflow-hidden bg-[#080c14] select-none">
+      {/* Mobile / Small Screen Navigation Tab Bar */}
+      <div className="lg:hidden flex items-center justify-around bg-[#0c121e] border-b border-slate-800 p-1 text-xs font-semibold">
         <button
           onClick={() => setMobileTab("textbook")}
-          className={`flex items-center gap-1.5 py-1.5 px-3 rounded-xl text-xs font-medium transition-all ${
+          className={`flex items-center gap-1.5 py-2 px-3 rounded-md transition-colors ${
             mobileTab === "textbook"
-              ? "bg-indigo-600 text-white shadow-md shadow-indigo-900/40"
+              ? "bg-indigo-600 text-white"
               : "text-slate-400 hover:text-slate-200"
           }`}
         >
-          <BookOpen className="w-3.5 h-3.5" />
-          <span>📚 Textbook</span>
+          <BookOpen className="w-4 h-4" />
+          <span>Textbook (p.{activePageNumber})</span>
         </button>
 
         <button
           onClick={() => setMobileTab("video")}
-          className={`flex items-center gap-1.5 py-1.5 px-3 rounded-xl text-xs font-medium transition-all ${
+          className={`flex items-center gap-1.5 py-2 px-3 rounded-md transition-colors ${
             mobileTab === "video"
-              ? "bg-red-600 text-white shadow-md shadow-red-900/40"
+              ? "bg-indigo-600 text-white"
               : "text-slate-400 hover:text-slate-200"
           }`}
         >
-          <Youtube className="w-3.5 h-3.5" />
-          <span>🎥 Video</span>
+          <Youtube className="w-4 h-4" />
+          <span>Lecture</span>
         </button>
 
         <button
           onClick={() => setMobileTab("tutor")}
-          className={`flex items-center gap-1.5 py-1.5 px-3 rounded-xl text-xs font-medium transition-all ${
+          className={`flex items-center gap-1.5 py-2 px-3 rounded-md transition-colors ${
             mobileTab === "tutor"
-              ? "bg-purple-600 text-white shadow-md shadow-purple-900/40"
+              ? "bg-indigo-600 text-white"
               : "text-slate-400 hover:text-slate-200"
           }`}
         >
-          <Bot className="w-3.5 h-3.5" />
-          <span>🤖 AI Tutor</span>
+          <Bot className="w-4 h-4" />
+          <span>AI Tutor</span>
         </button>
       </div>
 
-      {/* Main Container */}
-      <div ref={containerRef} className="flex-1 flex overflow-hidden relative">
+      {/* Main Responsive Grid Container */}
+      <div
+        ref={containerRef}
+        className="flex-1 flex overflow-hidden relative"
+      >
         {/* ========================================================================= */}
-        {/* LEFT PANEL: Digital Textbook Reader                                      */}
+        {/* LEFT PANEL: Original PDF / Textbook Reader */}
         {/* ========================================================================= */}
         <div
-          style={{
-            width: typeof window !== "undefined" && window.innerWidth < 768 ? "100%" : `${leftWidth}%`,
-          }}
-          className={`h-full flex flex-col transition-all duration-75 ${
-            mobileTab === "textbook" ? "flex" : "hidden md:flex"
-          }`}
+          style={{ width: isMounted ? `${leftWidth}%` : "50%" }}
+          className={`h-full flex flex-col border-r border-slate-800 bg-[#090d16] ${
+            mobileTab === "textbook" ? "flex" : "hidden lg:flex"
+          } w-full lg:w-auto relative`}
         >
           <TextbookPanel
             book={book}
@@ -215,94 +231,72 @@ export const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({
           />
         </div>
 
-        {/* ========================================================================= */}
-        {/* RESIZABLE DIVIDER (Horizontal between Left and Right)                     */}
-        {/* ========================================================================= */}
+        {/* Horizontal Split Resizer Handle (Desktop) */}
         <div
           onMouseDown={() => setIsDraggingH(true)}
-          className={`hidden md:flex w-1.5 hover:w-2 bg-slate-900 hover:bg-indigo-500/80 cursor-col-resize items-center justify-center transition-colors group z-20 select-none ${
-            isDraggingH ? "bg-indigo-600 w-2" : ""
-          }`}
-          title="Drag to resize textbook panel"
+          className="hidden lg:flex w-1 bg-slate-800/80 hover:bg-indigo-500 active:bg-indigo-600 cursor-col-resize items-center justify-center transition-colors z-20"
+          title="Drag to resize panels"
         >
-          <GripVertical className="w-3 h-3 text-slate-600 group-hover:text-white" />
+          <div className="w-1 h-8 rounded bg-slate-600/40" />
         </div>
 
         {/* ========================================================================= */}
-        {/* RIGHT AREA: Top Video + Bottom AI Tutor                                   */}
+        {/* RIGHT PANELS: Top = YouTube Lecture, Bottom = AI Tutor */}
         {/* ========================================================================= */}
         <div
-          style={{
-            width: typeof window !== "undefined" && window.innerWidth < 768 ? "100%" : `${100 - leftWidth}%`,
-          }}
-          className={`h-full flex flex-col overflow-hidden ${
-            mobileTab !== "textbook" ? "flex" : "hidden md:flex"
-          }`}
+          style={{ width: isMounted ? `${100 - leftWidth}%` : "50%" }}
+          className={`h-full flex-col ${
+            mobileTab !== "textbook" ? "flex" : "hidden lg:flex"
+          } w-full lg:w-auto overflow-hidden bg-[#080c14]`}
         >
-          {/* TOP RIGHT: Video Lecture Panel */}
+          {/* Top-Right: Video Lecture Panel */}
           <div
             style={{
-              height:
-                typeof window !== "undefined" && window.innerWidth < 768
-                  ? "100%"
-                  : isVideoCollapsed
-                  ? "44px"
-                  : `${topHeight}%`,
+              height: isVideoCollapsed ? "44px" : `${topHeight}%`,
             }}
-            className={`flex flex-col overflow-hidden transition-all duration-150 ${
-              mobileTab === "video" ? "flex" : mobileTab === "tutor" ? "hidden md:flex" : "flex"
-            }`}
+            className={`w-full border-b border-slate-800 transition-all ${
+              mobileTab === "video" ? "flex flex-1" : mobileTab === "tutor" ? "hidden lg:flex" : "flex"
+            } overflow-hidden`}
           >
             <VideoPanel
               video={video}
               bookId={book.id}
               activePageNumber={activePageNumber}
-              onNavigateToTextbookPage={(p) => {
-                onPageChange(p);
-                setMobileTab("textbook");
-              }}
+              onNavigateToTextbookPage={onPageChange}
               onAskAIAboutVideo={handleAskAIAboutVideo}
               onUpdateVideo={onUpdateVideo}
+              seekTimestamp={videoSeekTimestamp}
               isCollapsed={isVideoCollapsed}
               onToggleCollapse={() => setIsVideoCollapsed(!isVideoCollapsed)}
             />
           </div>
 
-          {/* RESIZABLE DIVIDER (Vertical between Video and AI Tutor) */}
+          {/* Vertical Split Resizer Handle (Desktop) */}
           {!isVideoCollapsed && (
             <div
               onMouseDown={() => setIsDraggingV(true)}
-              className={`hidden md:flex h-1.5 hover:h-2 bg-slate-900 hover:bg-indigo-500/80 cursor-row-resize items-center justify-center transition-colors group z-20 select-none ${
-                isDraggingV ? "bg-indigo-600 h-2" : ""
-              }`}
-              title="Drag to resize video and tutor panels"
+              className="hidden lg:flex h-1 bg-slate-800/80 hover:bg-indigo-500 active:bg-indigo-600 cursor-row-resize items-center justify-center transition-colors z-20"
+              title="Drag to resize video & AI tutor"
             >
-              <GripHorizontal className="w-3 h-3 text-slate-600 group-hover:text-white" />
+              <div className="h-1 w-8 rounded bg-slate-600/40" />
             </div>
           )}
 
-          {/* BOTTOM RIGHT: AI Tutor Panel */}
+          {/* Bottom-Right: AI Tutor Panel */}
           <div
             style={{
-              height:
-                typeof window !== "undefined" && window.innerWidth < 768
-                  ? "100%"
-                  : isVideoCollapsed
-                  ? "calc(100% - 44px)"
-                  : `${100 - topHeight}%`,
+              height: isVideoCollapsed ? "calc(100% - 44px)" : `${100 - topHeight}%`,
             }}
-            className={`flex-1 flex flex-col overflow-hidden transition-all duration-150 ${
-              mobileTab === "tutor" ? "flex" : mobileTab === "video" ? "hidden md:flex" : "flex"
-            }`}
+            className={`w-full flex-1 flex flex-col ${
+              mobileTab === "tutor" ? "flex" : mobileTab === "video" ? "hidden lg:flex" : "flex"
+            } overflow-hidden`}
           >
             <AITutorPanel
               book={book}
               activePageNumber={activePageNumber}
               activeVideo={video}
-              onNavigateToTextbookPage={(p) => {
-                onPageChange(p);
-                setMobileTab("textbook");
-              }}
+              onNavigateToTextbookPage={onPageChange}
+              onSeekVideoTimestamp={handleSeekVideoTimestamp}
               externalPrompt={externalPrompt}
               onClearExternalPrompt={() => setExternalPrompt(null)}
               onLaunchQuizFromAI={onLaunchQuiz}

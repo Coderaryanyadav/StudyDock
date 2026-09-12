@@ -16,11 +16,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: true, flashcards: [] });
     }
 
-    if (!bookId.startsWith("demo-")) {
-      const isOwner = await verifyBookOwnership(userId, bookId);
-      if (!isOwner) {
-        return NextResponse.json({ error: "Access denied." }, { status: 403 });
-      }
+    const isOwner = await verifyBookOwnership(userId, bookId);
+    if (!isOwner) {
+      return NextResponse.json({ error: "Access denied." }, { status: 403 });
     }
 
     const flashcards = await getFlashcardsForBook(userId, bookId);

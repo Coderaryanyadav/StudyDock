@@ -33,6 +33,27 @@ export interface ProcessedDocumentResult {
 }
 
 /**
+ * Validates PDF file signature and extension
+ */
+export function validatePdfFile(
+  fileBuffer: Buffer,
+  fileName: string,
+  mimeType: string
+): { isValid: boolean; error?: string; format?: string } {
+  if (!fileBuffer || fileBuffer.length === 0) {
+    return { isValid: false, error: "Zero-byte or empty file." };
+  }
+  if (!fileName.toLowerCase().endsWith(".pdf")) {
+    return { isValid: false, error: "File does not have a .pdf extension." };
+  }
+  const header = fileBuffer.slice(0, 5).toString("utf-8");
+  if (!header.startsWith("%PDF")) {
+    return { isValid: false, error: "Missing valid PDF header signature (%PDF-)." };
+  }
+  return { isValid: true, format: header };
+}
+
+/**
  * Extracts key domain terms from text without common stopwords
  */
 function extractKeyTerms(text: string): string[] {

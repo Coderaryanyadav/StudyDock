@@ -77,9 +77,9 @@ export async function getAuthenticatedUser(req?: NextRequest): Promise<AuthSessi
 export async function verifyBookOwnership(userId: string, bookId: string): Promise<boolean> {
   if (!bookId) return false;
 
-  // Demo book access is only allowed for demo book IDs in demo mode
+  // Demo book access is only allowed for demo book IDs when explicitly in DEMO_MODE
   if (bookId.startsWith("demo-")) {
-    return isDemoMode() || bookId === "demo-cn-topdown";
+    return isDemoMode();
   }
 
   if (!userId || userId === "guest-user") {

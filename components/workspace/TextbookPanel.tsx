@@ -20,6 +20,9 @@ import {
   Copy,
   Check,
   Eye,
+  Edit2,
+  Trash2,
+  Plus,
 } from "lucide-react";
 import { Book, BookPage, Highlight, LearningMode, Note } from "@/types";
 import { TextbookSelectionToolbar } from "./TextbookSelectionToolbar";
@@ -51,6 +54,7 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
   const [viewMode, setViewMode] = useState<"pdf" | "text">("pdf");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isSearching, setIsSearching] = useState<boolean>(false);
+  
   const [bookmarks, setBookmarks] = useState<number[]>([]);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -59,15 +63,12 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingContent, setEditingContent] = useState<string>("");
   const [selectedHighlightColor, setSelectedHighlightColor] = useState<"yellow" | "green" | "blue" | "pink">("yellow");
+  
   const [selectionToolbarPos, setSelectionToolbarPos] = useState<{ x: number; y: number } | null>(null);
   const [selectedText, setSelectedText] = useState<string>("");
   const [copied, setCopied] = useState<boolean>(false);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  const [currentSelectionCoords, setCurrentSelectionCoords] = useState<{
-    boundingRect?: any;
-    rects?: any[];
-  } | null>(null);
   const [pageInputVal, setPageInputVal] = useState<string>(String(activePageNumber));
 
   useEffect(() => {
@@ -119,7 +120,7 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
     }
   }, [activePageNumber]);
 
-  // Jump to page if targetCitationPage is triggered
+  // Scroll to citation target if specified
   useEffect(() => {
     if (targetCitationPage && targetCitationPage !== activePageNumber) {
       onPageChange(targetCitationPage);
@@ -127,132 +128,74 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
     }
   }, [targetCitationPage, activePageNumber, onPageChange, onClearTargetCitation]);
 
-  // Current page data
-  const currentPage: BookPage =
-    book.pages.find((p) => p.pageNumber === activePageNumber) ||
-    book.pages[0] || {
-      pageNumber: activePageNumber,
-      chapterId: null,
-      chapterTitle: null,
-      sectionId: null,
-      sectionTitle: null,
-      title: `Page ${activePageNumber}`,
-      content: "",
-    };
+  const isCurrentPageBookmarked = bookmarks.includes(activePageNumber);
 
-  // Handle text selection in textbook / PDF canvas
-  const handleMouseUp = () => {
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed) {
-      setSelectionToolbarPos(null);
-      setSelectedText("");
-      return;
-    }
+  const toggleBookmark = async () => {
+    const isBookmarked = isCurrentPageBookmarked;
+    const newBookmarks = isBookmarked
+      ? bookmarks.filter((p) => p !== activePageNumber)
+      : [...bookmarks, activePageNumber].sort((a, b) => a - b);
 
-    const text = selection.toString().trim();
-    if (text.length > 2) {
-      setSelectedText(text);
-      try {
-        const range = selection.getRangeAt(0);
-        const rect = range.getBoundingClientRect();
-        setSelectionToolbarPos({
-          x: Math.max(10, rect.left + rect.width / 2 - 100),
-          y: Math.max(10, rect.top - 10),
-        });
-      } catch (e) {
-        setSelectionToolbarPos(null);
+    setBookmarks(newBookmarks);
+
+    if (book?.id) {
+      if (isBookmarked) {
+        await fetch(`/api/annotations?bookId=${encodeURIComponent(book.id)}&type=bookmark&pageNumber=${activePageNumber}`, {
+          method: "DELETE",
+        }).catch(() => {});
+      } else {
+        await fetch("/api/annotations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bookId: book.id,
+            type: "bookmark",
+            pageNumber: activePageNumber,
+            title: `Bookmark on Page ${activePageNumber}`,
+          }),
+        }).catch(() => {});
       }
-    } else {
-      setSelectionToolbarPos(null);
-      setSelectedText("");
     }
   };
 
-  const handleSelectionAction = (
-    action: "explain" | "simplify" | "example" | "ask" | "flashcard" | "quiz" | "highlight" | "note",
-    mode?: LearningMode
-  ) => {
-    if (!selectedText) return;
-
-    if (action === "note") {
-      setNoteSelectedText(selectedText);
-      setShowNotes(true);
-      setShowHighlights(false);
-      setShowBookmarks(false);
-      setShowToc(false);
-      setSelectionToolbarPos(null);
-      window.getSelection()?.removeAllRanges();
-      return;
-    }
-
-    if (action === "highlight") {
-      const tempId = `hl-${Date.now()}`;
-      const newHl: Highlight = {
-        id: tempId,
-        bookId: book.id,
-        pageNumber: activePageNumber,
-        text: selectedText,
-        color: selectedHighlightColor,
-        boundingRect: currentSelectionCoords?.boundingRect,
-        rects: currentSelectionCoords?.rects,
-        createdAt: new Date().toISOString(),
-      };
-      setHighlights((prev) => [newHl, ...prev]);
-
-      fetch("/api/annotations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "highlight",
-          bookId: book.id,
-          pageNumber: activePageNumber,
-          text: selectedText,
-          color: selectedHighlightColor,
-          boundingRect: currentSelectionCoords?.boundingRect,
-          rects: currentSelectionCoords?.rects,
-        }),
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.id) {
-            setHighlights((prev) =>
-              prev.map((h) => (h.id === tempId ? { ...h, id: data.id } : h))
-            );
-          }
-        })
-        .catch((err) => console.warn("Failed to persist highlight:", err));
-
-      setSelectionToolbarPos(null);
-      window.getSelection()?.removeAllRanges();
-      return;
-    }
-
-    onAskAIWithSelection(selectedText, mode || (action as LearningMode));
-    setSelectionToolbarPos(null);
-    window.getSelection()?.removeAllRanges();
-  };
-
-  const handleCreateNote = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newNoteContent.trim() || !book?.id) return;
-
-    const tempId = `note-${Date.now()}`;
-    const newNoteObj: Note = {
-      id: tempId,
+  const handleCreateHighlight = async (color: "yellow" | "green" | "blue" | "pink") => {
+    if (!selectedText.trim() || !book?.id) return;
+    const newHighlight: Highlight = {
+      id: `hl-${Date.now()}`,
       bookId: book.id,
       pageNumber: activePageNumber,
-      selectedText: noteSelectedText || undefined,
-      content: newNoteContent.trim(),
+      text: selectedText,
+      color,
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
     };
 
-    setNotes((prev) => [newNoteObj, ...prev]);
-    const contentToSave = newNoteContent.trim();
-    const selTextToSave = noteSelectedText;
-    setNewNoteContent("");
-    setNoteSelectedText("");
+    setHighlights((prev) => [...prev, newHighlight]);
+    setSelectionToolbarPos(null);
 
+    await fetch("/api/annotations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bookId: book.id,
+        type: "highlight",
+        pageNumber: activePageNumber,
+        text: selectedText,
+        color,
+      }),
+    }).catch(() => {});
+  };
+
+  const handleDeleteHighlight = async (highlightId: string) => {
+    setHighlights((prev) => prev.filter((h) => h.id !== highlightId));
+    if (book?.id) {
+      await fetch(`/api/annotations?bookId=${encodeURIComponent(book.id)}&type=highlight&id=${encodeURIComponent(highlightId)}`, {
+        method: "DELETE",
+      }).catch(() => {});
+    }
+  };
+
+  const handleSaveNote = async () => {
+    if (!newNoteContent.trim() || !book?.id) return;
     try {
       const res = await fetch("/api/notes", {
         method: "POST",
@@ -260,49 +203,48 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
         body: JSON.stringify({
           bookId: book.id,
           pageNumber: activePageNumber,
-          selectedText: selTextToSave || undefined,
-          content: contentToSave,
+          content: newNoteContent.trim(),
+          selectedText: noteSelectedText || undefined,
         }),
       });
       const data = await res.json();
-      if (data.success && data.note) {
-        setNotes((prev) =>
-          prev.map((n) => (n.id === tempId ? data.note : n))
-        );
+      if (res.ok && data.note) {
+        setNotes((prev) => [data.note, ...prev]);
+        setNewNoteContent("");
+        setNoteSelectedText("");
       }
     } catch (err) {
-      console.warn("Failed to persist note:", err);
+      console.warn("Failed to save note:", err);
     }
   };
 
-  const handleUpdateNote = async (noteId: string) => {
-    if (!editingContent.trim()) return;
-
-    setNotes((prev) =>
-      prev.map((n) => (n.id === noteId ? { ...n, content: editingContent.trim(), updatedAt: new Date().toISOString() } : n))
-    );
-    const contentToSave = editingContent.trim();
-    setEditingNoteId(null);
-    setEditingContent("");
-
+  const handleUpdateNote = async (id: string) => {
+    if (!editingContent.trim() || !book?.id) return;
     try {
-      await fetch("/api/notes", {
+      const res = await fetch("/api/notes", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: noteId,
-          content: contentToSave,
+          id,
+          bookId: book.id,
+          content: editingContent.trim(),
         }),
       });
+      const data = await res.json();
+      if (res.ok && data.note) {
+        setNotes((prev) => prev.map((n) => (n.id === id ? data.note : n)));
+        setEditingNoteId(null);
+        setEditingContent("");
+      }
     } catch (err) {
       console.warn("Failed to update note:", err);
     }
   };
 
-  const handleDeleteNote = async (noteId: string) => {
-    setNotes((prev) => prev.filter((n) => n.id !== noteId));
+  const handleDeleteNote = async (id: string) => {
     try {
-      await fetch(`/api/notes?id=${encodeURIComponent(noteId)}`, {
+      setNotes((prev) => prev.filter((n) => n.id !== id));
+      await fetch(`/api/notes?id=${encodeURIComponent(id)}&bookId=${encodeURIComponent(book.id)}`, {
         method: "DELETE",
       });
     } catch (err) {
@@ -310,62 +252,55 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
     }
   };
 
-  const toggleBookmark = () => {
-    const isBookmarked = bookmarks.includes(activePageNumber);
-    if (isBookmarked) {
-      setBookmarks((prev) => prev.filter((p) => p !== activePageNumber));
-      fetch(`/api/annotations?type=bookmark&bookId=${encodeURIComponent(book.id)}&pageNumber=${activePageNumber}`, {
-        method: "DELETE",
-      }).catch((err) => console.warn("Failed to remove bookmark:", err));
+  // Text selection handler
+  const handleMouseUp = () => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) {
+      setSelectionToolbarPos(null);
+      return;
+    }
+
+    const text = selection.toString().trim();
+    if (text.length > 2) {
+      const range = selection.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      setSelectedText(text);
+      setSelectionToolbarPos({
+        x: rect.left + rect.width / 2,
+        y: rect.top - 10,
+      });
     } else {
-      setBookmarks((prev) => [...prev, activePageNumber]);
-      fetch("/api/annotations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "bookmark",
-          bookId: book.id,
-          pageNumber: activePageNumber,
-          title: `Page ${activePageNumber}`,
-        }),
-      }).catch((err) => console.warn("Failed to persist bookmark:", err));
+      setSelectionToolbarPos(null);
     }
   };
 
-  const handleZoom = (delta: number) => {
-    setZoomLevel((prev) => Math.min(200, Math.max(60, prev + delta)));
-  };
-
-  // Search matches across pages
-  const searchResults = searchQuery.trim()
-    ? book.pages.filter(
-        (p) =>
-          (p.title && p.title.toLowerCase().includes(searchQuery.toLowerCase())) ||
-          (p.content && p.content.toLowerCase().includes(searchQuery.toLowerCase()))
-      )
-    : [];
+  const activePageObj = book.pages?.find((p) => p.pageNumber === activePageNumber);
+  const totalPagesCount = book.totalPages || book.pages.length || 1;
 
   return (
-    <div className="flex flex-col h-full bg-slate-950 text-slate-100 border-r border-slate-800/80 select-text overflow-hidden relative">
-      {/* Textbook Header Controls */}
-      <div className="flex items-center justify-between px-3 py-2 bg-slate-900/90 border-b border-slate-800 backdrop-blur-sm z-20">
-        {/* Left: TOC, Bookmarks, Highlights drawers & View mode switch */}
+    <div className="flex-1 flex flex-col h-full bg-[#090d16] text-slate-100 overflow-hidden relative select-text">
+      
+      {/* ========================================================================= */}
+      {/* Top Academic Reader Toolbar */}
+      {/* ========================================================================= */}
+      <div className="h-12 bg-[#0c121e] border-b border-slate-800 px-3 md:px-4 flex items-center justify-between shrink-0 select-none z-10 text-xs">
+        
+        {/* Left Controls: ToC, Bookmarks, Highlights, Notes */}
         <div className="flex items-center gap-1">
           <button
             onClick={() => {
               setShowToc(!showToc);
               setShowBookmarks(false);
               setShowHighlights(false);
+              setShowNotes(false);
             }}
-            className={`p-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors ${
-              showToc
-                ? "bg-indigo-600/30 text-indigo-300 border border-indigo-500/40"
-                : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"
+            className={`p-1.5 rounded-md transition-colors flex items-center gap-1.5 ${
+              showToc ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800"
             }`}
             title="Table of Contents"
           >
             <ListTree className="w-4 h-4" />
-            <span className="hidden md:inline">Contents</span>
+            <span className="hidden sm:inline font-medium">Contents</span>
           </button>
 
           <button
@@ -373,16 +308,15 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
               setShowBookmarks(!showBookmarks);
               setShowToc(false);
               setShowHighlights(false);
+              setShowNotes(false);
             }}
-            className={`p-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors ${
-              showBookmarks
-                ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"
+            className={`p-1.5 rounded-md transition-colors flex items-center gap-1 ${
+              showBookmarks ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800"
             }`}
             title="Bookmarks"
           >
             <Bookmark className="w-4 h-4" />
-            <span className="hidden md:inline">({bookmarks.length})</span>
+            <span className="font-mono text-[11px] font-semibold">({bookmarks.length})</span>
           </button>
 
           <button
@@ -392,15 +326,13 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
               setShowBookmarks(false);
               setShowNotes(false);
             }}
-            className={`p-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors ${
-              showHighlights
-                ? "bg-yellow-500/20 text-yellow-300 border border-yellow-500/40"
-                : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"
+            className={`p-1.5 rounded-md transition-colors flex items-center gap-1 ${
+              showHighlights ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800"
             }`}
             title="Highlights"
           >
-            <Highlighter className="w-4 h-4 text-yellow-400" />
-            <span className="hidden md:inline">({highlights.length})</span>
+            <Highlighter className="w-4 h-4" />
+            <span className="font-mono text-[11px] font-semibold">({highlights.length})</span>
           </button>
 
           <button
@@ -410,117 +342,79 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
               setShowBookmarks(false);
               setShowHighlights(false);
             }}
-            className={`p-1.5 rounded-lg text-xs font-medium flex items-center gap-1 transition-colors ${
-              showNotes
-                ? "bg-indigo-600/30 text-indigo-300 border border-indigo-500/40"
-                : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"
+            className={`p-1.5 rounded-md transition-colors flex items-center gap-1 ${
+              showNotes ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800"
             }`}
             title="Study Notes"
           >
-            <FileText className="w-4 h-4 text-indigo-400" />
-            <span className="hidden md:inline">Notes ({notes.length})</span>
+            <FileText className="w-4 h-4" />
+            <span className="font-mono text-[11px] font-semibold">({notes.length})</span>
           </button>
-
-          {/* View Mode Toggle: Original PDF vs Extracted Text */}
-          <div className="hidden lg:flex items-center ml-1 pl-1 border-l border-slate-800">
-            <button
-              onClick={() => setViewMode(viewMode === "pdf" ? "text" : "pdf")}
-              className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors ${
-                viewMode === "pdf"
-                  ? "bg-indigo-600/20 text-indigo-300 border border-indigo-500/30"
-                  : "bg-slate-800/80 text-slate-300 hover:bg-slate-800"
-              }`}
-              title="Toggle between Original PDF and Text Extraction"
-            >
-              {viewMode === "pdf" ? (
-                <>
-                  <Eye className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>Original PDF</span>
-                </>
-              ) : (
-                <>
-                  <FileText className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Text View</span>
-                </>
-              )}
-            </button>
-          </div>
         </div>
 
-        {/* Center: Chapter info & Page Navigator */}
-        <div className="flex items-center gap-1.5 text-xs">
+        {/* Center: Clean Page Navigation */}
+        <div className="flex items-center gap-2 bg-[#060910] px-2 py-0.5 rounded-md border border-slate-800">
           <button
+            onClick={() => onPageChange(Math.max(1, activePageNumber - 1))}
             disabled={activePageNumber <= 1}
-            onClick={() => onPageChange(activePageNumber - 1)}
-            className="p-1 rounded hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent text-slate-300"
-            title="Previous Page (Left Arrow)"
+            className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
+            title="Previous Page (←)"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
 
-          <form
-            onSubmit={handlePageInputSubmit}
-            className="flex items-center gap-1 font-mono bg-slate-950 px-2 py-0.5 rounded-lg border border-slate-800 shadow-inner"
-          >
+          <form onSubmit={handlePageInputSubmit} className="flex items-center gap-1">
             <input
               type="text"
-              inputMode="numeric"
               value={pageInputVal}
               onChange={(e) => setPageInputVal(e.target.value)}
-              onBlur={() => {
-                const parsed = parseInt(pageInputVal, 10);
-                const maxPages = book.totalPages || book.pages.length || 1;
-                if (!isNaN(parsed) && parsed >= 1 && parsed <= maxPages && parsed !== activePageNumber) {
-                  onPageChange(parsed);
-                } else {
-                  setPageInputVal(String(activePageNumber));
-                }
-              }}
-              className="w-8 text-center bg-transparent text-indigo-400 font-semibold focus:outline-none focus:bg-slate-800 rounded text-xs"
-              title="Click or edit to jump directly to page number"
+              className="w-9 h-6 bg-slate-800 text-center font-mono font-bold text-white text-xs rounded border border-slate-700 focus:outline-none focus:border-indigo-500"
             />
-            <span className="text-slate-600">/</span>
-            <span className="text-slate-400 text-xs pr-1">{book.totalPages || book.pages.length || 1}</span>
+            <span className="text-slate-500 font-mono text-[11px]">/ {totalPagesCount}</span>
           </form>
 
           <button
-            disabled={activePageNumber >= (book.totalPages || book.pages.length || 1)}
-            onClick={() => onPageChange(activePageNumber + 1)}
-            className="p-1 rounded hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent text-slate-300"
-            title="Next Page (Right Arrow)"
+            onClick={() => onPageChange(Math.min(totalPagesCount, activePageNumber + 1))}
+            disabled={activePageNumber >= totalPagesCount}
+            className="p-1 rounded text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
+            title="Next Page (→)"
           >
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Right: Search, Zoom, Bookmark Toggle */}
-        <div className="flex items-center gap-1">
+        {/* Right Controls: Bookmark Current Page, View Mode, Zoom */}
+        <div className="flex items-center gap-1.5">
           <button
-            onClick={() => setIsSearching(!isSearching)}
-            className={`p-1.5 rounded-lg text-xs transition-colors ${
-              isSearching
-                ? "bg-indigo-600/30 text-indigo-300"
-                : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"
+            onClick={toggleBookmark}
+            className={`p-1.5 rounded-md transition-colors ${
+              isCurrentPageBookmarked
+                ? "text-amber-400 bg-amber-400/10 border border-amber-400/30"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
             }`}
-            title="Search in Textbook"
+            title={isCurrentPageBookmarked ? "Remove Bookmark" : "Bookmark this page"}
           >
-            <Search className="w-4 h-4" />
+            {isCurrentPageBookmarked ? (
+              <BookmarkCheck className="w-4 h-4" />
+            ) : (
+              <Bookmark className="w-4 h-4" />
+            )}
           </button>
 
-          <div className="hidden sm:flex items-center gap-0.5 bg-slate-950/80 rounded-lg p-0.5 border border-slate-800">
+          <div className="hidden sm:flex items-center gap-1 border-l border-slate-800 pl-1.5">
             <button
-              onClick={() => handleZoom(-15)}
-              className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200"
+              onClick={() => setZoomLevel((prev) => Math.max(50, prev - 10))}
+              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
               title="Zoom Out"
             >
               <ZoomOut className="w-3.5 h-3.5" />
             </button>
-            <span className="text-[10px] text-slate-400 font-mono px-1">
+            <span className="font-mono text-[11px] text-slate-400 w-9 text-center">
               {zoomLevel}%
             </span>
             <button
-              onClick={() => handleZoom(15)}
-              className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200"
+              onClick={() => setZoomLevel((prev) => Math.min(200, prev + 10))}
+              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
               title="Zoom In"
             >
               <ZoomIn className="w-3.5 h-3.5" />
@@ -528,450 +422,311 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
           </div>
 
           <button
-            onClick={toggleBookmark}
-            className={`p-1.5 rounded-lg text-xs transition-colors ${
-              bookmarks.includes(activePageNumber)
-                ? "text-amber-400 hover:text-amber-300"
-                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-            }`}
-            title={bookmarks.includes(activePageNumber) ? "Remove Bookmark" : "Bookmark this Page"}
+            onClick={() => setViewMode(viewMode === "pdf" ? "text" : "pdf")}
+            className="hidden md:flex items-center gap-1 px-2 py-1 rounded-md bg-slate-800/80 hover:bg-slate-800 text-slate-300 text-[11px] font-medium transition-colors border border-slate-700/60"
           >
-            {bookmarks.includes(activePageNumber) ? (
-              <BookmarkCheck className="w-4 h-4 text-amber-400" />
-            ) : (
-              <Bookmark className="w-4 h-4" />
-            )}
+            <Eye className="w-3.5 h-3.5 text-indigo-400" />
+            <span>{viewMode === "pdf" ? "Text" : "PDF"}</span>
           </button>
         </div>
+
       </div>
 
-      {/* Search Input Bar */}
-      {isSearching && (
-        <div className="px-3 py-2 bg-slate-900 border-b border-slate-800 flex items-center gap-2 animate-in slide-in-from-top-2 duration-150">
-          <Search className="w-4 h-4 text-slate-400 shrink-0" />
-          <input
-            type="text"
-            placeholder="Search within textbook chapters & pages..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            autoFocus
-            className="w-full bg-slate-950 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery("")}
-              className="text-slate-400 hover:text-slate-200"
-            >
+      {/* ========================================================================= */}
+      {/* Side Drawers: Table of Contents, Bookmarks, Highlights, Notes */}
+      {/* ========================================================================= */}
+      {showToc && (
+        <div className="absolute left-0 top-12 bottom-0 w-80 bg-[#0c121e] border-r border-slate-800 z-30 flex flex-col shadow-2xl animate-in slide-in-from-left duration-150">
+          <div className="p-3.5 border-b border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ListTree className="w-4 h-4 text-indigo-400" />
+              <h4 className="font-semibold text-xs text-white uppercase tracking-wider">Table of Contents</h4>
+            </div>
+            <button onClick={() => setShowToc(false)} className="p-1 text-slate-400 hover:text-white">
               <X className="w-4 h-4" />
             </button>
-          )}
-        </div>
-      )}
-
-      {/* Search Results Overlay */}
-      {isSearching && searchQuery.trim().length > 0 && (
-        <div className="bg-slate-900/95 border-b border-slate-800 max-h-48 overflow-y-auto px-3 py-2 text-xs divide-y divide-slate-800/60 z-20 shadow-lg">
-          <div className="text-[11px] font-semibold text-slate-400 mb-1">
-            Found {searchResults.length} matching page(s):
           </div>
-          {searchResults.length === 0 ? (
-            <div className="text-slate-500 py-1 italic">No matching pages found.</div>
-          ) : (
-            searchResults.map((p) => (
-              <button
-                key={p.pageNumber}
-                onClick={() => {
-                  onPageChange(p.pageNumber);
-                  setIsSearching(false);
-                }}
-                className="w-full text-left py-1.5 px-2 hover:bg-slate-800 rounded transition-colors flex items-center justify-between text-slate-300 hover:text-indigo-300"
-              >
-                <div className="truncate font-medium">
-                  Page {p.pageNumber}: {p.title || `Page ${p.pageNumber}`}
-                </div>
-                <span className="text-[10px] text-indigo-400 ml-2">Jump →</span>
-              </button>
-            ))
-          )}
-        </div>
-      )}
-
-      {/* Main Workspace Container */}
-      <div className="flex-1 flex overflow-hidden relative">
-        {/* Table of Contents Drawer */}
-        {showToc && (
-          <div className="w-64 bg-slate-900 border-r border-slate-800 h-full overflow-y-auto p-3 text-xs z-10 flex flex-col shrink-0 animate-in slide-in-from-left duration-150">
-            <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-800">
-              <span className="font-semibold text-slate-300 flex items-center gap-1.5">
-                <ListTree className="w-4 h-4 text-indigo-400" /> Table of Contents
-              </span>
-              <button
-                onClick={() => setShowToc(false)}
-                className="text-slate-400 hover:text-slate-200 p-0.5 rounded"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="space-y-3">
-              {book.chapters.length > 0 ? (
-                book.chapters.map((ch) => (
-                  <div key={ch.id} className="space-y-1">
-                    <div className="font-semibold text-slate-300 text-[11px] uppercase tracking-wider">
-                      Ch {ch.number}: {ch.title}
-                    </div>
-                    <div className="space-y-0.5 pl-2 border-l border-slate-800">
-                      {ch.sections.map((sec) => (
-                        <button
-                          key={sec.id}
-                          onClick={() => {
-                            onPageChange(sec.page);
-                            setShowToc(false);
-                          }}
-                          className={`w-full text-left py-1 px-1.5 rounded transition-colors text-[11px] flex items-center justify-between ${
-                            activePageNumber === sec.page
-                              ? "bg-indigo-600/30 text-indigo-300 font-medium"
-                              : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                          }`}
-                        >
-                          <span className="truncate">{sec.title}</span>
-                          <span className="text-[10px] font-mono text-slate-500 ml-1">
-                            p.{sec.page}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="space-y-1">
-                  {book.pages.slice(0, 30).map((p) => (
-                    <button
-                      key={p.pageNumber}
-                      onClick={() => {
-                        onPageChange(p.pageNumber);
-                        setShowToc(false);
-                      }}
-                      className={`w-full text-left py-1 px-1.5 rounded transition-colors text-[11px] flex items-center justify-between ${
-                        activePageNumber === p.pageNumber
-                          ? "bg-indigo-600/30 text-indigo-300 font-medium"
-                          : "text-slate-400 hover:bg-slate-800"
-                      }`}
-                    >
-                      <span className="truncate">{p.title || `Page ${p.pageNumber}`}</span>
-                      <span className="text-[10px] font-mono text-slate-500">p.{p.pageNumber}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Bookmarks Drawer */}
-        {showBookmarks && (
-          <div className="w-64 bg-slate-900 border-r border-slate-800 h-full overflow-y-auto p-3 text-xs z-10 flex flex-col shrink-0 animate-in slide-in-from-left duration-150">
-            <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-800">
-              <span className="font-semibold text-amber-400 flex items-center gap-1.5">
-                <Bookmark className="w-4 h-4" /> Saved Bookmarks
-              </span>
-              <button
-                onClick={() => setShowBookmarks(false)}
-                className="text-slate-400 hover:text-slate-200 p-0.5 rounded"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="space-y-1">
-              {bookmarks.length === 0 ? (
-                <div className="text-slate-500 italic py-2">No bookmarks saved yet.</div>
-              ) : (
-                bookmarks.map((pNum) => {
-                  const pageItem = book.pages.find((p) => p.pageNumber === pNum);
-                  return (
-                    <button
-                      key={pNum}
-                      onClick={() => {
-                        onPageChange(pNum);
-                        setShowBookmarks(false);
-                      }}
-                      className="w-full text-left py-1.5 px-2 rounded hover:bg-slate-800 text-slate-300 hover:text-amber-300 transition-colors flex items-center justify-between"
-                    >
-                      <span className="truncate font-medium">
-                        Page {pNum}: {pageItem?.title || "Book Page"}
-                      </span>
-                      <span className="text-[10px] text-amber-500 font-mono">Jump</span>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Highlights Drawer */}
-        {showHighlights && (
-          <div className="w-64 bg-slate-900 border-r border-slate-800 h-full overflow-y-auto p-3 text-xs z-10 flex flex-col shrink-0 animate-in slide-in-from-left duration-150">
-            <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-800">
-              <span className="font-semibold text-yellow-400 flex items-center gap-1.5">
-                <Highlighter className="w-4 h-4" /> Highlights & Notes
-              </span>
-              <button
-                onClick={() => setShowHighlights(false)}
-                className="text-slate-400 hover:text-slate-200 p-0.5 rounded"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="space-y-2">
-              {highlights.length === 0 ? (
-                <div className="text-slate-500 italic py-2">
-                  No highlights yet. Select text in the reader and click &ldquo;Highlight&rdquo;.
-                </div>
-              ) : (
-                highlights.map((hl) => (
-                  <div
-                    key={hl.id}
-                    onClick={() => {
-                      onPageChange(hl.pageNumber);
-                      setShowHighlights(false);
-                    }}
-                    className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 hover:border-yellow-500/50 cursor-pointer transition-all space-y-1.5 group"
-                  >
-                    <div className="flex items-center justify-between text-[10px] text-slate-400">
-                      <span className="font-mono text-yellow-400 font-semibold">
-                        Page {hl.pageNumber}
-                      </span>
-                      <span className="opacity-0 group-hover:opacity-100 text-yellow-400">
-                        Jump →
-                      </span>
-                    </div>
-                    <p className="text-slate-200 text-[11px] line-clamp-3 italic border-l-2 border-yellow-400/80 pl-2">
-                      &ldquo;{hl.text}&rdquo;
-                    </p>
-                    {hl.note && (
-                      <p className="text-slate-400 text-[10px] bg-slate-900 p-1.5 rounded">
-                        Note: {hl.note}
-                      </p>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Study Notes Drawer */}
-        {showNotes && (
-          <div className="w-72 bg-slate-900 border-r border-slate-800 h-full overflow-y-auto p-3 text-xs z-10 flex flex-col shrink-0 animate-in slide-in-from-left duration-150 space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-              <span className="font-semibold text-indigo-300 flex items-center gap-1.5">
-                <FileText className="w-4 h-4 text-indigo-400" /> Study Notes ({notes.length})
-              </span>
-              <button
-                onClick={() => setShowNotes(false)}
-                className="text-slate-400 hover:text-slate-200 p-0.5 rounded"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Create New Note Form */}
-            <form onSubmit={handleCreateNote} className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
-              <div className="flex items-center justify-between text-[10px] text-slate-400">
-                <span className="font-semibold text-slate-300">New Note (Page {activePageNumber})</span>
-                {noteSelectedText && (
-                  <button
-                    type="button"
-                    onClick={() => setNoteSelectedText("")}
-                    className="text-rose-400 hover:underline"
-                  >
-                    Clear Quote
-                  </button>
-                )}
-              </div>
-
-              {noteSelectedText && (
-                <div className="p-1.5 rounded bg-slate-900 text-[10px] text-slate-300 italic line-clamp-2 border-l-2 border-indigo-400">
-                  &ldquo;{noteSelectedText}&rdquo;
-                </div>
-              )}
-
-              <textarea
-                value={newNoteContent}
-                onChange={(e) => setNewNoteContent(e.target.value)}
-                placeholder="Type your notes or insights here..."
-                rows={3}
-                className="w-full bg-slate-900 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 resize-none"
-              />
-
-              <div className="flex justify-end">
+          <div className="flex-1 overflow-y-auto p-3 space-y-1.5 custom-scrollbar text-xs">
+            {book.chapters && book.chapters.length > 0 ? (
+              book.chapters.map((ch) => (
                 <button
-                  type="submit"
-                  disabled={!newNoteContent.trim()}
-                  className="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-medium text-[11px] transition-colors shadow-sm"
+                  key={ch.id}
+                  onClick={() => {
+                    onPageChange(ch.startPage);
+                    setShowToc(false);
+                  }}
+                  className={`w-full text-left p-2 rounded-md transition-colors flex items-center justify-between ${
+                    activePageNumber >= ch.startPage && activePageNumber <= ch.endPage
+                      ? "bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 font-medium"
+                      : "text-slate-300 hover:bg-slate-800/80"
+                  }`}
                 >
-                  Save Note
+                  <span className="truncate pr-2">{ch.title}</span>
+                  <span className="font-mono text-[10px] text-slate-500 shrink-0">p.{ch.startPage}</span>
                 </button>
-              </div>
-            </form>
+              ))
+            ) : (
+              <div className="p-4 text-center text-slate-500 text-xs">No chapter outline indexed.</div>
+            )}
+          </div>
+        </div>
+      )}
 
-            {/* List of Notes */}
-            <div className="space-y-2 flex-1 overflow-y-auto">
-              {notes.length === 0 ? (
-                <div className="text-slate-500 italic py-2 text-center">
-                  No notes saved for this textbook yet. Write your thoughts above or select text to create a note.
+      {showBookmarks && (
+        <div className="absolute left-0 top-12 bottom-0 w-80 bg-[#0c121e] border-r border-slate-800 z-30 flex flex-col shadow-2xl animate-in slide-in-from-left duration-150">
+          <div className="p-3.5 border-b border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Bookmark className="w-4 h-4 text-amber-400" />
+              <h4 className="font-semibold text-xs text-white uppercase tracking-wider">Saved Bookmarks</h4>
+            </div>
+            <button onClick={() => setShowBookmarks(false)} className="p-1 text-slate-400 hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar text-xs">
+            {bookmarks.length > 0 ? (
+              bookmarks.map((pageNum) => (
+                <button
+                  key={pageNum}
+                  onClick={() => {
+                    onPageChange(pageNum);
+                    setShowBookmarks(false);
+                  }}
+                  className="w-full text-left p-2.5 rounded-md bg-slate-900 border border-slate-800 hover:border-indigo-500/50 flex items-center justify-between transition-colors text-slate-200"
+                >
+                  <div className="flex items-center gap-2">
+                    <Bookmark className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Page {pageNum}</span>
+                  </div>
+                  <span className="text-[10px] text-indigo-400 font-medium">Jump →</span>
+                </button>
+              ))
+            ) : (
+              <div className="p-6 text-center text-slate-500 text-xs">No bookmarks saved yet.</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showHighlights && (
+        <div className="absolute left-0 top-12 bottom-0 w-80 bg-[#0c121e] border-r border-slate-800 z-30 flex flex-col shadow-2xl animate-in slide-in-from-left duration-150">
+          <div className="p-3.5 border-b border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Highlighter className="w-4 h-4 text-indigo-400" />
+              <h4 className="font-semibold text-xs text-white uppercase tracking-wider">Highlights ({highlights.length})</h4>
+            </div>
+            <button onClick={() => setShowHighlights(false)} className="p-1 text-slate-400 hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-2.5 custom-scrollbar text-xs">
+            {highlights.length > 0 ? (
+              highlights.map((hl) => (
+                <div
+                  key={hl.id}
+                  className="p-3 rounded-md bg-slate-900 border border-slate-800 space-y-2 text-slate-200"
+                >
+                  <p className="line-clamp-3 italic text-[11px] text-slate-300 border-l-2 border-indigo-400 pl-2">
+                    &ldquo;{hl.text}&rdquo;
+                  </p>
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-800/60">
+                    <button
+                      onClick={() => {
+                        onPageChange(hl.pageNumber);
+                        setShowHighlights(false);
+                      }}
+                      className="text-indigo-400 hover:text-indigo-300 font-mono text-[11px]"
+                    >
+                      Page {hl.pageNumber} →
+                    </button>
+                    <button
+                      onClick={() => handleDeleteHighlight(hl.id)}
+                      className="p-1 text-slate-500 hover:text-rose-400 transition-colors"
+                      title="Delete highlight"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
-              ) : (
-                notes.map((n) => (
-                  <div
-                    key={n.id}
-                    className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5"
-                  >
-                    <div className="flex items-center justify-between text-[10px] text-slate-400">
+              ))
+            ) : (
+              <div className="p-6 text-center text-slate-500 text-xs">Select text in the reader to highlight passages.</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showNotes && (
+        <div className="absolute left-0 top-12 bottom-0 w-88 bg-[#0c121e] border-r border-slate-800 z-30 flex flex-col shadow-2xl animate-in slide-in-from-left duration-150">
+          <div className="p-3.5 border-b border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-indigo-400" />
+              <h4 className="font-semibold text-xs text-white uppercase tracking-wider">Study Notes ({notes.length})</h4>
+            </div>
+            <button onClick={() => setShowNotes(false)} className="p-1 text-slate-400 hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Create Note Form */}
+          <div className="p-3 border-b border-slate-800/80 bg-slate-950/60 space-y-2">
+            <div className="text-[11px] text-slate-400 font-medium">Add note for Page {activePageNumber}:</div>
+            <textarea
+              value={newNoteContent}
+              onChange={(e) => setNewNoteContent(e.target.value)}
+              placeholder="Type your study notes, key takeaways, or equations..."
+              rows={3}
+              className="w-full p-2 rounded bg-slate-900 border border-slate-700/80 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 resize-none"
+            />
+            <button
+              onClick={handleSaveNote}
+              disabled={!newNoteContent.trim()}
+              className="w-full py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Save Note</span>
+            </button>
+          </div>
+
+          {/* Notes List */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar text-xs">
+            {notes.map((note) => (
+              <div
+                key={note.id}
+                className="p-3 rounded-md bg-slate-900 border border-slate-800 space-y-2 text-slate-200"
+              >
+                {editingNoteId === note.id ? (
+                  <div className="space-y-2">
+                    <textarea
+                      value={editingContent}
+                      onChange={(e) => setEditingContent(e.target.value)}
+                      rows={3}
+                      className="w-full p-2 rounded bg-slate-950 border border-indigo-500 text-white text-xs resize-none"
+                    />
+                    <div className="flex items-center gap-2 justify-end">
                       <button
-                        onClick={() => {
-                          onPageChange(n.pageNumber);
-                          setShowNotes(false);
-                        }}
-                        className="font-mono text-indigo-400 font-semibold hover:underline flex items-center gap-1"
+                        onClick={() => setEditingNoteId(null)}
+                        className="px-2 py-1 rounded text-[11px] text-slate-400 hover:text-white"
                       >
-                        Page {n.pageNumber} →
+                        Cancel
                       </button>
-                      <div className="flex items-center gap-1.5">
-                        {editingNoteId !== n.id && (
-                          <button
-                            onClick={() => {
-                              setEditingNoteId(n.id);
-                              setEditingContent(n.content);
-                            }}
-                            className="text-slate-400 hover:text-slate-200 text-[10px]"
-                          >
-                            Edit
-                          </button>
-                        )}
+                      <button
+                        onClick={() => handleUpdateNote(note.id)}
+                        className="px-2.5 py-1 rounded bg-indigo-600 text-white text-[11px] font-semibold"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {note.selectedText && (
+                      <p className="text-[10px] italic text-slate-400 border-l border-slate-700 pl-2 line-clamp-2">
+                        &ldquo;{note.selectedText}&rdquo;
+                      </p>
+                    )}
+                    <p className="text-xs text-slate-100 whitespace-pre-wrap">{note.content}</p>
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 text-[10px] text-slate-500">
+                      <button
+                        onClick={() => onPageChange(note.pageNumber)}
+                        className="text-indigo-400 hover:text-indigo-300 font-mono"
+                      >
+                        Page {note.pageNumber} →
+                      </button>
+                      <div className="flex items-center gap-1">
                         <button
-                          onClick={() => handleDeleteNote(n.id)}
-                          className="text-rose-400 hover:text-rose-300 text-[10px]"
+                          onClick={() => {
+                            setEditingNoteId(note.id);
+                            setEditingContent(note.content);
+                          }}
+                          className="p-1 hover:text-slate-200"
+                          title="Edit note"
                         >
-                          Delete
+                          <Edit2 className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteNote(note.id)}
+                          className="p-1 hover:text-rose-400"
+                          title="Delete note"
+                        >
+                          <Trash2 className="w-3 h-3" />
                         </button>
                       </div>
                     </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
-                    {n.selectedText && (
-                      <p className="text-slate-400 text-[10px] italic border-l border-slate-700 pl-1.5 line-clamp-2">
-                        &ldquo;{n.selectedText}&rdquo;
-                      </p>
-                    )}
+      {/* ========================================================================= */}
+      {/* Main Reading Surface: PDF or Clean Text */}
+      {/* ========================================================================= */}
+      <div
+        ref={contentRef}
+        onMouseUp={handleMouseUp}
+        className="flex-1 overflow-y-auto p-4 md:p-8 flex justify-center bg-[#070b12] custom-scrollbar"
+      >
+        {viewMode === "pdf" ? (
+          <div
+            style={{ transform: `scale(${zoomLevel / 100})`, transformOrigin: "top center" }}
+            className="transition-transform duration-100 w-full flex justify-center"
+          >
+            <PdfViewer
+              bookId={book.id}
+              pageNumber={activePageNumber}
+              scale={zoomLevel / 100}
+              onPageChange={onPageChange}
+              highlights={highlights.filter((h) => h.pageNumber === activePageNumber)}
+              totalPages={totalPagesCount}
+            />
+          </div>
+        ) : (
+          <div
+            style={{ maxWidth: "720px", transform: `scale(${zoomLevel / 100})`, transformOrigin: "top center" }}
+            className="w-full bg-[#0d131f] border border-slate-800/90 rounded-lg p-6 md:p-10 shadow-lg text-slate-200 space-y-4 leading-relaxed font-serif text-sm md:text-base transition-transform"
+          >
+            <div className="pb-3 border-b border-slate-800 flex items-center justify-between font-sans">
+              <span className="text-xs text-indigo-400 font-semibold uppercase tracking-wider">
+                {activePageObj?.chapterTitle || "Chapter Reading"}
+              </span>
+              <span className="text-xs font-mono text-slate-500">Page {activePageNumber}</span>
+            </div>
+            
+            <h2 className="text-xl md:text-2xl font-bold font-sans text-white pt-2">
+              {activePageObj?.sectionTitle || activePageObj?.title || `Page ${activePageNumber}`}
+            </h2>
 
-                    {editingNoteId === n.id ? (
-                      <div className="space-y-1.5 pt-1">
-                        <textarea
-                          value={editingContent}
-                          onChange={(e) => setEditingContent(e.target.value)}
-                          rows={3}
-                          className="w-full bg-slate-900 text-xs px-2 py-1 rounded border border-indigo-500 text-slate-200 focus:outline-none resize-none"
-                        />
-                        <div className="flex justify-end gap-1.5">
-                          <button
-                            onClick={() => setEditingNoteId(null)}
-                            className="px-2 py-0.5 rounded text-[10px] text-slate-400 hover:bg-slate-800"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            onClick={() => handleUpdateNote(n.id)}
-                            className="px-2 py-0.5 rounded text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white font-medium"
-                          >
-                            Save
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-slate-200 text-[11px] leading-relaxed whitespace-pre-wrap">
-                        {n.content}
-                      </p>
-                    )}
-                  </div>
-                ))
-              )}
+            <div className="text-slate-300 whitespace-pre-line leading-loose font-serif">
+              {renderMathInText(activePageObj?.content || "No extracted text available for this page.")}
             </div>
           </div>
         )}
-
-        {/* Digital Textbook Reading Canvas / Real PDF Canvas */}
-        <div
-          ref={contentRef}
-          onMouseUp={handleMouseUp}
-          className="flex-1 overflow-y-auto p-2 sm:p-4 md:p-6 flex justify-center bg-slate-950/60 custom-scrollbar relative"
-        >
-          {/* Floating Context Toolbar on Selection */}
-          <TextbookSelectionToolbar
-            position={selectionToolbarPos}
-            selectedText={selectedText}
-            onAction={handleSelectionAction}
-            onClose={() => setSelectionToolbarPos(null)}
-          />
-
-          {viewMode === "pdf" ? (
-            /* Real Original Uploaded PDF Canvas Renderer */
-            <div className="w-full flex justify-center items-start">
-              <PdfViewer
-                bookId={book.id}
-                pageNumber={activePageNumber}
-                scale={zoomLevel / 100}
-                onPageChange={onPageChange}
-                onMouseUp={handleMouseUp}
-                onSelectionCoords={(coords) => setCurrentSelectionCoords(coords)}
-                highlights={highlights}
-                totalPages={book.totalPages || book.pages.length}
-              />
-            </div>
-          ) : (
-            /* Extracted Text View */
-            <div
-              style={{ zoom: `${zoomLevel}%` }}
-              className="w-full max-w-3xl bg-slate-900 border border-slate-800/90 rounded-2xl shadow-2xl p-4 sm:p-6 md:p-8 flex flex-col relative h-fit"
-            >
-              <div className="flex items-center justify-between pb-4 mb-6 border-b border-slate-800 text-[11px] text-slate-400 uppercase tracking-widest font-mono">
-                <span className="truncate max-w-[320px]">{currentPage.chapterTitle || book.title}</span>
-                <span className="text-indigo-400 font-bold">Page {currentPage.pageNumber}</span>
-              </div>
-
-              <div className="prose prose-invert prose-indigo max-w-none text-slate-200 text-sm leading-relaxed space-y-4 whitespace-pre-wrap">
-                {currentPage.content ? (
-                  currentPage.content
-                ) : (
-                  <div className="text-slate-500 italic py-8 text-center">
-                    This page contains visual elements or formatting displayed in the Original PDF view.
-                  </div>
-                )}
-              </div>
-
-              {currentPage.keyTakeaways && currentPage.keyTakeaways.length > 0 && (
-                <div className="mt-8 p-4 rounded-xl bg-indigo-950/30 border border-indigo-500/30 text-xs">
-                  <div className="flex items-center gap-1.5 font-semibold text-indigo-300 mb-2">
-                    <Sparkles className="w-4 h-4 text-indigo-400" />
-                    <span>Key Concepts:</span>
-                  </div>
-                  <ul className="space-y-1.5 list-disc list-inside text-slate-300">
-                    {currentPage.keyTakeaways.map((takeaway, i) => (
-                      <li key={i} className="leading-snug">
-                        {takeaway}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              <div className="mt-8 pt-4 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-500">
-                <span>{book.title}</span>
-                <span>{book.author || "Academic Textbook"}</span>
-              </div>
-            </div>
-          )}
-        </div>
       </div>
+
+      {/* Floating Selection Toolbar */}
+      {selectionToolbarPos && selectedText && (
+        <TextbookSelectionToolbar
+          position={selectionToolbarPos}
+          selectedText={selectedText}
+          onAction={(action, mode) => {
+            if (action === "highlight") {
+              handleCreateHighlight(selectedHighlightColor);
+            } else if (action === "note") {
+              setShowNotes(true);
+              setNoteSelectedText(selectedText);
+              setSelectionToolbarPos(null);
+            } else {
+              onAskAIWithSelection(selectedText, mode);
+              setSelectionToolbarPos(null);
+            }
+          }}
+          onClose={() => setSelectionToolbarPos(null)}
+        />
+      )}
+
     </div>
   );
 };

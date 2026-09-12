@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { Youtube, Link, Check, X, BookOpen, AlertCircle } from "lucide-react";
-import { VideoLecture } from "@/types";
+import { extractYoutubeId } from "@/lib/youtube/metadata";
 
 interface ConnectLectureModalProps {
   isOpen: boolean;
@@ -21,22 +21,15 @@ export const ConnectLectureModal: React.FC<ConnectLectureModalProps> = ({
 
   if (!isOpen) return null;
 
-  const extractYoutubeId = (inputUrl: string): string | null => {
-    const match = inputUrl.match(
-      /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/
-    );
-    return match ? match[1] : null;
-  };
-
   const handleConnect = (e: React.FormEvent) => {
     e.preventDefault();
     const videoId = extractYoutubeId(url);
     if (!videoId) {
-      setError("Please provide a valid YouTube video URL or ID (e.g. https://www.youtube.com/watch?v=...)");
+      setError("Please provide a valid YouTube video URL or 11-character video ID.");
       return;
     }
     setError("");
-    onConnectLecture(url, title || "Connected YouTube Lecture");
+    onConnectLecture(url, title.trim());
     onClose();
   };
 

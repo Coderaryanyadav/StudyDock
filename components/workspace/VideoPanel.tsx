@@ -1,11 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
-import Image from "next/image";
+import React, { useState, useEffect } from "react";
 import {
   Youtube,
   Play,
-  Pause,
   ExternalLink,
   BookOpen,
   Clock,
@@ -16,8 +14,14 @@ import {
   ChevronUp,
   Maximize2,
   Minimize2,
+  Trash2,
+  FileText,
+  AlertTriangle,
+  Search,
+  Plus,
+  X,
 } from "lucide-react";
-import { VideoLecture, VideoTopic } from "@/types";
+import { VideoLecture, VideoTopic, VideoTranscriptSegment } from "@/types";
 import { ConnectLectureModal } from "./ConnectLectureModal";
 
 interface VideoPanelProps {
@@ -25,8 +29,9 @@ interface VideoPanelProps {
   bookId?: string;
   activePageNumber: number;
   onNavigateToTextbookPage: (page: number) => void;
-  onAskAIAboutVideo: (topic: VideoTopic) => void;
-  onUpdateVideo: (newVideo: VideoLecture) => void;
+  onAskAIAboutVideo: (topic: VideoTopic | VideoTranscriptSegment) => void;
+  onUpdateVideo: (newVideo: VideoLecture | null) => void;
+  seekTimestamp?: number | null;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
 }
@@ -38,253 +43,277 @@ export const VideoPanel: React.FC<VideoPanelProps> = ({
   onNavigateToTextbookPage,
   onAskAIAboutVideo,
   onUpdateVideo,
+  seekTimestamp,
   isCollapsed = false,
   onToggleCollapse,
 }) => {
-  const [activeTopicIndex, setActiveTopicIndex] = useState<number>(0);
   const [isConnectModalOpen, setIsConnectModalOpen] = useState<boolean>(false);
   const [currentTimestamp, setCurrentTimestamp] = useState<number>(0);
-  const [showAllTopics, setShowAllTopics] = useState<boolean>(false);
+  const [showTranscriptDrawer, setShowTranscriptDrawer] = useState<boolean>(false);
+  const [transcriptSearch, setTranscriptSearch] = useState<string>("");
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const activeTopic = video?.topics && video.topics.length > 0
-    ? video.topics[activeTopicIndex] || video.topics[0]
-    : null;
-
-  const handleTopicClick = (index: number) => {
-    setActiveTopicIndex(index);
-    if (video?.topics && video.topics[index]) {
-      setCurrentTimestamp(video.topics[index].timestampSeconds);
+  // Sync seekTimestamp if changed from external (e.g. AI citation click)
+  useEffect(() => {
+    if (seekTimestamp !== undefined && seekTimestamp !== null) {
+      setCurrentTimestamp(seekTimestamp);
     }
-  };
+  }, [seekTimestamp]);
 
   const handleConnectLecture = async (url: string, customTitle: string) => {
-    const match = url.match(
-      /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/
-    );
-    if (!match) {
-      alert("Please provide a valid 11-character YouTube video URL.");
+    setIsLoading(true);
+    setErrorMessage(null);
+
+    if (!bookId) {
+      setIsLoading(false);
       return;
     }
-    const videoId = match[1];
 
-    if (bookId) {
-      try {
-        const res = await fetch(`/api/books/${bookId}/video`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            youtubeUrl: url,
-            title: customTitle || `YouTube Lecture (${videoId})`,
-          }),
-        });
-        const data = await res.json();
-        if (res.ok && data.video) {
-          onUpdateVideo(data.video);
-          return;
-        }
-      } catch (err) {
-        console.warn("Failed to persist video on server:", err);
+    try {
+      const res = await fetch(`/api/books/${bookId}/video`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          youtubeUrl: url,
+          title: customTitle,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.video) {
+        onUpdateVideo(data.video);
+        setCurrentTimestamp(0);
+      } else {
+        setErrorMessage(data.error || "Failed to connect YouTube video.");
       }
+    } catch (err: any) {
+      console.warn("Failed to persist video on server:", err);
+      setErrorMessage("Network error while connecting video lecture.");
+    } finally {
+      setIsLoading(false);
     }
-
-    const newVideo: VideoLecture = {
-      id: `vid-${videoId}`,
-      title: customTitle || `YouTube Lecture (${videoId})`,
-      youtubeId: videoId,
-      channelName: null,
-      durationSeconds: 0,
-      formattedDuration: "00:00",
-      bookId: bookId || "",
-      topics: [],
-    };
-
-    onUpdateVideo(newVideo);
   };
 
-  if (isCollapsed) {
-    return (
-      <div className="bg-slate-900 border-b border-slate-800 px-3 py-2 flex items-center justify-between text-xs shrink-0 select-none">
-        <div className="flex items-center gap-2">
-          <div className="p-1 rounded bg-red-600/20 text-red-400">
+  const handleDisconnectVideo = async () => {
+    if (!bookId || !video) return;
+    try {
+      await fetch(`/api/books/${bookId}/video?videoId=${encodeURIComponent(video.id)}`, {
+        method: "DELETE",
+      });
+      onUpdateVideo(null);
+    } catch (err) {
+      console.warn("Failed to disconnect video:", err);
+    }
+  };
+
+  const filteredTranscripts = (video?.transcript || []).filter((seg) =>
+    transcriptSearch ? seg.text.toLowerCase().includes(transcriptSearch.toLowerCase()) : true
+  );
+
+  return (
+    <div className="flex-1 flex flex-col h-full bg-[#080c14] text-slate-200 overflow-hidden relative">
+      
+      {/* ========================================================================= */}
+      {/* Video Panel Top Header Bar */}
+      {/* ========================================================================= */}
+      <div className="h-11 bg-[#0c121e] border-b border-slate-800 px-3 md:px-4 flex items-center justify-between shrink-0 select-none z-10 text-xs">
+        
+        <div className="flex items-center gap-2 overflow-hidden">
+          <div className="p-1 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 shrink-0">
             <Youtube className="w-3.5 h-3.5" />
           </div>
-          <span className="font-medium text-slate-300 truncate max-w-xs">
-            🎥 Video: {video ? video.title : "No lecture attached"}
-          </span>
+          <div className="flex items-center gap-2 truncate">
+            <span className="font-semibold text-white truncate max-w-[200px] md:max-w-[280px]">
+              {video ? video.title : "Linked Video Lecture"}
+            </span>
+            {video?.channelName && (
+              <span className="text-[11px] text-slate-400 hidden sm:inline truncate">
+                • {video.channelName}
+              </span>
+            )}
+          </div>
         </div>
-        <button
-          onClick={onToggleCollapse}
-          className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-300 transition-colors"
-        >
-          <span>Expand Video</span>
-          <ChevronDown className="w-3.5 h-3.5" />
-        </button>
-      </div>
-    );
-  }
 
-  if (!video) {
-    return (
-      <div className="flex flex-col h-full bg-slate-950 text-slate-100 border-b border-slate-800/80 overflow-hidden relative select-none">
+        {/* Action Controls */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {video && (
+            <>
+              {/* Transcript Status Badge & Drawer Toggle */}
+              {video.transcript && video.transcript.length > 0 ? (
+                <button
+                  onClick={() => setShowTranscriptDrawer(!showTranscriptDrawer)}
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                    showTranscriptDrawer
+                      ? "bg-indigo-600 text-white"
+                      : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20"
+                  }`}
+                >
+                  <FileText className="w-3 h-3" />
+                  <span className="hidden sm:inline">Transcript</span>
+                  <span className="font-mono">({video.transcript.length})</span>
+                </button>
+              ) : (
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-400 border border-slate-700/60">
+                  Transcript Unavailable
+                </span>
+              )}
+
+              {/* Replace Video */}
+              <button
+                onClick={() => setIsConnectModalOpen(true)}
+                className="px-2 py-0.5 rounded text-[11px] text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                title="Replace Video URL"
+              >
+                Replace
+              </button>
+
+              {/* Unlink Video */}
+              <button
+                onClick={handleDisconnectVideo}
+                className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                title="Disconnect Video"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
+
+          {/* Connect Video if none attached */}
+          {!video && (
+            <button
+              onClick={() => setIsConnectModalOpen(true)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Connect Lecture</span>
+            </button>
+          )}
+
+          {/* Collapse/Expand Panel Toggle */}
+          {onToggleCollapse && (
+            <button
+              onClick={onToggleCollapse}
+              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors ml-1"
+              title={isCollapsed ? "Expand Video" : "Collapse Video"}
+            >
+              {isCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+            </button>
+          )}
+        </div>
+
+      </div>
+
+      {/* ========================================================================= */}
+      {/* Video Content Area */}
+      {/* ========================================================================= */}
+      {!isCollapsed && (
+        <div className="flex-1 flex flex-col overflow-hidden bg-black relative">
+          {video ? (
+            <div className="flex-1 w-full h-full relative flex items-center justify-center bg-black">
+              <iframe
+                src={`https://www.youtube-nocookie.com/embed/${video.youtubeId}?enablejsapi=1&start=${currentTimestamp}&rel=0`}
+                title={video.title}
+                className="w-full h-full border-0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
+            </div>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3 bg-[#0a0e18]">
+              <div className="w-10 h-10 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center">
+                <Youtube className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-sm font-semibold text-slate-200">No YouTube Lecture Connected</h4>
+                <p className="text-xs text-slate-400 max-w-sm">
+                  Paste a YouTube lecture URL to sync timestamped transcripts and enable video-grounded AI tutoring.
+                </p>
+              </div>
+              <button
+                onClick={() => setIsConnectModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition-colors"
+              >
+                <LinkIcon className="w-3.5 h-3.5" />
+                <span>Connect YouTube Lecture</span>
+              </button>
+            </div>
+          )}
+
+          {/* Transcript Drawer Overlay */}
+          {showTranscriptDrawer && video?.transcript && (
+            <div className="absolute inset-y-0 right-0 w-80 bg-[#0c121e]/95 backdrop-blur-md border-l border-slate-800 z-20 flex flex-col shadow-2xl animate-in slide-in-from-right duration-150">
+              <div className="p-3 border-b border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-emerald-400" />
+                  <h4 className="font-semibold text-xs text-white uppercase tracking-wider">Video Transcript</h4>
+                </div>
+                <button onClick={() => setShowTranscriptDrawer(false)} className="p-1 text-slate-400 hover:text-white">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Search transcript */}
+              <div className="p-2.5 border-b border-slate-800/80 bg-slate-950/40">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5" />
+                  <input
+                    type="text"
+                    value={transcriptSearch}
+                    onChange={(e) => setTranscriptSearch(e.target.value)}
+                    placeholder="Search in transcript..."
+                    className="w-full pl-8 pr-3 py-1.5 rounded bg-slate-900 border border-slate-800 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Segments List */}
+              <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar text-xs">
+                {filteredTranscripts.length > 0 ? (
+                  filteredTranscripts.map((seg, idx) => (
+                    <div
+                      key={idx}
+                      className="p-2.5 rounded bg-slate-900/80 border border-slate-800/80 space-y-1 hover:border-slate-700 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <button
+                          onClick={() => setCurrentTimestamp(seg.timestampSeconds)}
+                          className="font-mono text-[11px] font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
+                        >
+                          <Play className="w-2.5 h-2.5 fill-current" />
+                          <span>{seg.formattedTime}</span>
+                        </button>
+                        <button
+                          onClick={() => onAskAIAboutVideo(seg)}
+                          className="text-[10px] text-slate-400 hover:text-slate-200 flex items-center gap-1"
+                          title="Ask AI about this moment"
+                        >
+                          <Sparkles className="w-3 h-3 text-purple-400" />
+                          <span>Ask AI</span>
+                        </button>
+                      </div>
+                      <p className="text-slate-300 text-xs leading-relaxed">{seg.text}</p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="p-6 text-center text-slate-500 text-xs">
+                    {transcriptSearch ? "No matches found in transcript." : "No transcript segments available."}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Connect Lecture Modal */}
+      {isConnectModalOpen && (
         <ConnectLectureModal
           isOpen={isConnectModalOpen}
           onClose={() => setIsConnectModalOpen(false)}
           onConnectLecture={handleConnectLecture}
         />
-        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3">
-          <div className="w-12 h-12 rounded-2xl bg-red-600/10 border border-red-500/20 text-red-400 flex items-center justify-center">
-            <Youtube className="w-6 h-6" />
-          </div>
-          <div className="space-y-1">
-            <h4 className="font-semibold text-xs text-slate-200">No Lecture Connected</h4>
-            <p className="text-[11px] text-slate-400 max-w-xs">
-              Attach a YouTube video lecture related to this textbook to study alongside video explanations.
-            </p>
-          </div>
-          <button
-            onClick={() => setIsConnectModalOpen(true)}
-            className="px-3.5 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold shadow-md transition-colors flex items-center gap-1.5"
-          >
-            <Youtube className="w-3.5 h-3.5" />
-            <span>Connect YouTube Lecture</span>
-          </button>
-        </div>
-      </div>
-    );
-  }
+      )}
 
-  return (
-    <div className="flex flex-col h-full bg-slate-950 text-slate-100 border-b border-slate-800/80 overflow-hidden relative select-none">
-      <ConnectLectureModal
-        isOpen={isConnectModalOpen}
-        onClose={() => setIsConnectModalOpen(false)}
-        onConnectLecture={handleConnectLecture}
-      />
-
-      {/* Video Panel Top Bar */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-slate-900/95 border-b border-slate-800 text-xs backdrop-blur-md z-10 shrink-0">
-        <div className="flex items-center gap-2 truncate">
-          <div className="p-1 rounded bg-red-600/10 text-red-400 border border-red-500/20 shrink-0">
-            <Youtube className="w-3.5 h-3.5" />
-          </div>
-          <div className="truncate">
-            <span className="font-semibold text-slate-200 truncate block text-xs">
-              {video.title}
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setIsConnectModalOpen(true)}
-            className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-medium text-slate-300 hover:text-white transition-all border border-slate-700/60"
-            title="Connect another YouTube lecture"
-          >
-            Connect
-          </button>
-          {onToggleCollapse && (
-            <button
-              onClick={onToggleCollapse}
-              className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
-              title="Minimize Video Panel"
-            >
-              <ChevronUp className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Main Video Body */}
-      <div className="flex-1 overflow-y-auto p-2.5 space-y-2 custom-scrollbar">
-        {/* Responsive Player Box with automatic aspect ratio */}
-        <div className="relative w-full max-h-[210px] aspect-video mx-auto rounded-xl overflow-hidden bg-black border border-slate-800 shadow-lg group">
-          <iframe
-            src={`https://www.youtube.com/embed/${video.youtubeId}?start=${currentTimestamp}&rel=0&modestbranding=1`}
-            title={video.title}
-            className="w-full h-full border-0 absolute inset-0"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowFullScreen
-          />
-        </div>
-
-        {/* Synchronized Topic & Actions Bar if topics exist */}
-        {activeTopic ? (
-          <div className="p-2.5 bg-slate-900/90 border border-slate-800/90 rounded-xl space-y-1.5">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-200 truncate">
-                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-500/30 font-bold shrink-0">
-                  {activeTopic.formattedTime}
-                </span>
-                <span className="truncate">{activeTopic.title}</span>
-              </div>
-
-              <span className="shrink-0 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-mono flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3" />
-                <span>p.{activeTopic.pageNumber}</span>
-              </span>
-            </div>
-
-            {/* Connected Action Buttons */}
-            <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/60">
-              <button
-                onClick={() => onNavigateToTextbookPage(activeTopic.pageNumber)}
-                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 text-[11px] font-medium transition-colors"
-              >
-                <BookOpen className="w-3 h-3" />
-                <span>Find in Textbook (p.{activeTopic.pageNumber})</span>
-              </button>
-
-              <button
-                onClick={() => onAskAIAboutVideo(activeTopic)}
-                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium transition-colors border border-slate-700/60"
-              >
-                <Sparkles className="w-3 h-3 text-amber-400" />
-                <span>Ask AI</span>
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="p-2.5 bg-slate-900/60 border border-slate-800/60 rounded-xl text-center text-xs text-slate-400">
-            <span>Video synced with study workspace</span>
-          </div>
-        )}
-
-        {/* Lecture Chapter Markers (if topics available) */}
-        {video.topics && video.topics.length > 0 && (
-          <div className="space-y-1">
-            <div className="flex items-center justify-between text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-1">
-              <span>Lecture Timestamps:</span>
-              <button
-                onClick={() => setShowAllTopics(!showAllTopics)}
-                className="text-indigo-400 hover:underline normal-case text-[10px]"
-              >
-                {showAllTopics ? "Show less" : `View all (${video.topics.length})`}
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-1">
-              {(showAllTopics ? video.topics : video.topics.slice(0, 4)).map((t, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => handleTopicClick(idx)}
-                  className={`p-1.5 rounded-lg text-left border transition-all text-xs flex items-center justify-between ${
-                    activeTopicIndex === idx
-                      ? "bg-indigo-950/60 border-indigo-500/80 text-indigo-200 shadow-sm"
-                      : "bg-slate-900/50 border-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                  }`}
-                >
-                  <span className="truncate text-[10px] font-medium text-slate-200 pr-1">
-                    {t.formattedTime} {t.title}
-                  </span>
-                  <span className="text-[9px] text-slate-500 font-mono shrink-0">
-                    p.{t.pageNumber}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
     </div>
   );
 };

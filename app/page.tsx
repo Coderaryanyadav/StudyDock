@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Book, StudentProgress, VideoLecture } from "@/types";
+import { BookOpen, Upload } from "lucide-react";
 import { WorkspaceNavbar } from "@/components/navbar/WorkspaceNavbar";
 import { WorkspaceLayout } from "@/components/workspace/WorkspaceLayout";
 import { StudyDashboard } from "@/components/dashboard/StudyDashboard";
@@ -379,31 +380,30 @@ export default function Home() {
               onLaunchFlashcards={handleOpenFlashcardsModal}
             />
           ) : (
-            <div className="flex flex-col items-center justify-center h-full space-y-6">
-              <div className="w-24 h-24 bg-slate-800/50 rounded-full flex items-center justify-center border border-slate-700/50">
-                <svg className="w-10 h-10 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                </svg>
+            <div className="flex flex-col items-center justify-center h-full p-6 text-center space-y-5 bg-[#080c14]">
+              <div className="w-16 h-16 bg-[#0f1624] rounded-xl flex items-center justify-center border border-slate-800 text-indigo-400">
+                <BookOpen className="w-8 h-8" />
               </div>
-              <div className="text-center">
-                <h2 className="text-2xl font-bold mb-2">Welcome to StudyDock</h2>
-                <p className="text-slate-400 max-w-md mx-auto">Upload a textbook to get started. The AI tutor will analyze the material and help you learn faster.</p>
+              <div className="space-y-1 max-w-md">
+                <h2 className="text-xl md:text-2xl font-bold text-white tracking-tight">Welcome to StudyDock</h2>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Import your course textbook PDF to read, watch synchronized lectures, and study with an AI tutor grounded in your exact page numbers.
+                </p>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 pt-2">
                 <button 
                   onClick={() => setIsUploadModalOpen(true)}
-                  className="bg-indigo-600 text-white px-6 py-2.5 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-900/20 font-medium flex items-center gap-2"
+                  className="bg-indigo-600 text-white px-5 py-2.5 rounded-lg hover:bg-indigo-500 transition-colors shadow-sm font-semibold text-xs flex items-center gap-2"
                 >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                  </svg>
-                  Upload Textbook
+                  <Upload className="w-4 h-4" />
+                  <span>Import Textbook PDF</span>
                 </button>
                 <button
                   onClick={() => setIsLibraryModalOpen(true)}
-                  className="bg-slate-900 text-slate-200 border border-slate-800 px-6 py-2.5 rounded-xl hover:bg-slate-800 transition-colors font-medium flex items-center gap-2"
+                  className="bg-[#0f1624] text-slate-200 border border-slate-800 px-5 py-2.5 rounded-lg hover:bg-slate-800 transition-colors font-medium text-xs flex items-center gap-2"
                 >
-                  Open Library
+                  <BookOpen className="w-4 h-4 text-indigo-400" />
+                  <span>Open Library</span>
                 </button>
               </div>
             </div>
@@ -419,6 +419,8 @@ export default function Home() {
             }}
             onLaunchQuiz={handleOpenQuizModal}
             onLaunchFlashcards={handleOpenFlashcardsModal}
+            onOpenLibrary={() => setIsLibraryModalOpen(true)}
+            onOpenUpload={() => setIsUploadModalOpen(true)}
           />
         )}
 

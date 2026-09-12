@@ -4,51 +4,63 @@
 
 @layer base {
   :root {
-    --background: 222 47% 6%;
+    --background: 222 47% 5%;
     --foreground: 210 40% 98%;
-    --card: 222 47% 9%;
+    --card: 222 47% 8%;
     --card-foreground: 210 40% 98%;
-    --popover: 222 47% 8%;
+    --popover: 222 47% 7%;
     --popover-foreground: 210 40% 98%;
     --primary: 239 84% 67%;
     --primary-foreground: 210 40% 98%;
-    --secondary: 217 33% 17%;
+    --secondary: 217 33% 14%;
     --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 17%;
+    --muted: 217 33% 12%;
     --muted-foreground: 215 20% 65%;
-    --accent: 217 33% 17%;
+    --accent: 217 33% 15%;
     --accent-foreground: 210 40% 98%;
-    --destructive: 0 63% 31%;
+    --destructive: 0 72% 51%;
     --destructive-foreground: 210 40% 98%;
-    --border: 217 33% 17%;
-    --input: 217 33% 17%;
+    --border: 217 33% 16%;
+    --input: 217 33% 16%;
     --ring: 239 84% 67%;
-    --radius: 0.75rem;
+    --radius: 0.5rem;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
-/* Custom Sleek Scrollbar */
+/* Custom Sleek Academic Scrollbar */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6);
+  background: transparent;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(71, 85, 105, 0.5);
+  background: rgba(100, 116, 139, 0.35);
   border-radius: 9999px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(99, 102, 241, 0.7);
+  background: rgba(148, 163, 184, 0.6);
 }
 
 /* Text selection in reader */
 ::selection {
-  background: rgba(99, 102, 241, 0.35);
+  background: rgba(99, 102, 241, 0.3);
   color: #ffffff;
 }
 
@@ -60,12 +72,19 @@
   margin: 0.5rem 0 !important;
 }
 
-/* Animations */
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+/* Markdown prose enhancements */
+.prose pre {
+  background-color: #0d131f !important;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.5rem;
 }
 
-.animate-fade-in {
-  animation: fadeIn 0.2s ease-out forwards;
+.prose code {
+  font-family: var(--font-jetbrains-mono, monospace);
+  font-size: 0.85em;
+}
+
+/* Subtle transitions */
+.transition-surface {
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }

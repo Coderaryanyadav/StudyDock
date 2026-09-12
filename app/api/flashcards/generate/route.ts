@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Authentication required to generate flashcards." }, { status: 401 });
     }
 
-    if (bookId && !bookId.startsWith("demo-")) {
+    if (bookId) {
       const isOwner = await verifyBookOwnership(userId, bookId);
       if (!isOwner) {
         return NextResponse.json({ error: "Access denied. You do not own this textbook." }, { status: 403 });

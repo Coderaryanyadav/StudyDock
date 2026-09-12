@@ -144,6 +144,15 @@ CREATE TABLE IF NOT EXISTS video_topics (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS video_transcripts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    video_id UUID NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    timestamp_seconds INT NOT NULL,
+    formatted_time TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ------------------------------------------------------------------------------
 -- CONVERSATIONS & CHAT MESSAGES
 -- ------------------------------------------------------------------------------
@@ -389,6 +398,7 @@ ALTER TABLE book_pages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE book_chunks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE videos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE video_topics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE video_transcripts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE message_citations ENABLE ROW LEVEL SECURITY;
@@ -455,6 +465,11 @@ CREATE POLICY "Users can access topics of own videos" ON video_topics
     FOR ALL TO authenticated
     USING (EXISTS (SELECT 1 FROM videos WHERE videos.id = video_topics.video_id AND videos.user_id = auth.uid()))
     WITH CHECK (EXISTS (SELECT 1 FROM videos WHERE videos.id = video_topics.video_id AND videos.user_id = auth.uid()));
+
+CREATE POLICY "Users can access transcripts of own videos" ON video_transcripts
+    FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM videos WHERE videos.id = video_transcripts.video_id AND videos.user_id = auth.uid()))
+    WITH CHECK (EXISTS (SELECT 1 FROM videos WHERE videos.id = video_transcripts.video_id AND videos.user_id = auth.uid()));
 
 -- Conversations & Messages
 CREATE POLICY "Users can access own conversations" ON conversations

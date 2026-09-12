@@ -18,11 +18,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: true, notes: [] });
     }
 
-    if (!bookId.startsWith("demo-")) {
-      const isOwner = await verifyBookOwnership(userId, bookId);
-      if (!isOwner) {
-        return NextResponse.json({ error: "Access denied." }, { status: 403 });
-      }
+    const isOwner = await verifyBookOwnership(userId, bookId);
+    if (!isOwner) {
+      return NextResponse.json({ error: "Access denied." }, { status: 403 });
     }
 
     const notes = await getNotesForBook(userId, bookId);
@@ -49,11 +47,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Book ID and note content are required." }, { status: 400 });
     }
 
-    if (!bookId.startsWith("demo-")) {
-      const isOwner = await verifyBookOwnership(userId, bookId);
-      if (!isOwner) {
-        return NextResponse.json({ error: "Access denied. You do not own this book." }, { status: 403 });
-      }
+    const isOwner = await verifyBookOwnership(userId, bookId);
+    if (!isOwner) {
+      return NextResponse.json({ error: "Access denied. You do not own this book." }, { status: 403 });
     }
 
     const note = await saveNote(userId, {

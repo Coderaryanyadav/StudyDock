@@ -1,6 +1,8 @@
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { VideoLecture } from "@/types";
+import { VideoLecture, VideoTranscriptSegment } from "@/types";
+import { extractYoutubeId, fetchYoutubeMetadata } from "@/lib/youtube/metadata";
+import { fetchYoutubeTranscript } from "@/lib/youtube/transcript";
 
 export async function getVideosForBook(
   userId: string,
@@ -11,75 +13,115 @@ export async function getVideosForBook(
 
   const { data: rows, error } = await supabase
     .from("videos")
-    .select("*, video_topics(*)")
+    .select("*, video_topics(*), video_transcripts(*)")
     .eq("book_id", bookId)
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
 
   if (error || !rows) return [];
 
-  return rows.map((v: any) => ({
-    id: v.id,
-    youtubeId: v.youtube_id,
-    title: v.title,
-    channelName: v.channel_name || null,
-    durationSeconds: v.duration_seconds || 0,
-    formattedDuration: v.formatted_duration || "00:00",
-    bookId: v.book_id,
-    topics: (v.video_topics || []).map((t: any) => ({
-      timestampSeconds: t.timestamp_seconds,
-      formattedTime: t.formatted_time,
-      title: t.title,
-      chapterId: `ch-${t.page_number || 1}`,
-      pageNumber: t.page_number || 1,
-      summary: t.summary || "",
-    })),
-  }));
+  return rows.map((v: any) => {
+    const rawTranscripts: any[] = v.video_transcripts || [];
+    const transcript: VideoTranscriptSegment[] = rawTranscripts
+      .sort((a, b) => a.timestamp_seconds - b.timestamp_seconds)
+      .map((t) => ({
+        timestampSeconds: t.timestamp_seconds,
+        formattedTime: t.formatted_time,
+        text: t.text,
+      }));
+
+    return {
+      id: v.id,
+      youtubeId: v.youtube_id,
+      title: v.title || "YouTube Lecture",
+      channelName: v.channel_name || null,
+      durationSeconds: v.duration_seconds || 0,
+      formattedDuration: v.formatted_duration || "00:00",
+      bookId: v.book_id,
+      topics: (v.video_topics || []).map((t: any) => ({
+        timestampSeconds: t.timestamp_seconds,
+        formattedTime: t.formatted_time,
+        title: t.title,
+        chapterId: `ch-${t.page_number || 1}`,
+        pageNumber: t.page_number || 1,
+        summary: t.summary || "",
+      })),
+      transcript: transcript.length > 0 ? transcript : undefined,
+      transcriptUnavailable: transcript.length === 0,
+    };
+  });
 }
 
 export async function attachVideoToBook(
   userId: string,
   bookId: string,
-  youtubeId: string,
-  title: string,
-  channelName?: string
+  urlOrId: string,
+  customTitle?: string
 ): Promise<VideoLecture | null> {
   const supabase = (await createServerSupabaseClient()) || createAdminClient();
-  if (!supabase || !userId || !bookId || !youtubeId) return null;
+  if (!supabase || !userId || !bookId || !urlOrId) return null;
 
-  const { data, error } = await supabase
+  const youtubeId = extractYoutubeId(urlOrId);
+  if (!youtubeId) return null;
+
+  // 1. Fetch real metadata via oEmbed
+  const metadata = await fetchYoutubeMetadata(youtubeId);
+  const resolvedTitle = customTitle?.trim() || metadata?.title || `YouTube Lecture (${youtubeId})`;
+  const resolvedChannel = metadata?.channelName || null;
+
+  // 2. Insert into videos table
+  const { data: videoRow, error } = await supabase
     .from("videos")
     .insert({
       user_id: userId,
       book_id: bookId,
       youtube_id: youtubeId,
-      title: title || "Attached Lecture",
-      channel_name: channelName || null,
+      title: resolvedTitle,
+      channel_name: resolvedChannel,
+      created_at: new Date().toISOString(),
     })
     .select("*")
     .single();
 
-  if (error || !data) return null;
+  if (error || !videoRow) {
+    console.error("Failed to insert video record:", error);
+    return null;
+  }
 
-  // Also update books.youtube_url
+  // 3. Update book's youtube_url and title
   await supabase
     .from("books")
     .update({
       youtube_url: `https://www.youtube.com/watch?v=${youtubeId}`,
-      video_title: title,
+      video_title: resolvedTitle,
     })
     .eq("id", bookId)
     .eq("user_id", userId);
 
+  // 4. Retrieve real transcript if available
+  const transcriptSegments = await fetchYoutubeTranscript(youtubeId);
+  if (transcriptSegments && transcriptSegments.length > 0) {
+    const transcriptRows = transcriptSegments.map((s) => ({
+      video_id: videoRow.id,
+      timestamp_seconds: s.timestampSeconds,
+      formatted_time: s.formattedTime,
+      text: s.text,
+    }));
+
+    await supabase.from("video_transcripts").insert(transcriptRows);
+  }
+
   return {
-    id: data.id,
-    youtubeId: data.youtube_id,
-    title: data.title,
-    channelName: data.channel_name,
-    durationSeconds: data.duration_seconds || 0,
-    formattedDuration: data.formatted_duration || "00:00",
-    bookId: data.book_id,
+    id: videoRow.id,
+    youtubeId: videoRow.youtube_id,
+    title: videoRow.title,
+    channelName: videoRow.channel_name,
+    durationSeconds: videoRow.duration_seconds || 0,
+    formattedDuration: videoRow.formatted_duration || "00:00",
+    bookId: videoRow.book_id,
     topics: [],
+    transcript: transcriptSegments && transcriptSegments.length > 0 ? transcriptSegments : undefined,
+    transcriptUnavailable: !transcriptSegments || transcriptSegments.length === 0,
   };
 }
 

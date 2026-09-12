@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { X, Sparkles, BookOpen, Youtube, ArrowRight, Check } from "lucide-react";
+import { X, GraduationCap, BookOpen, Youtube, ArrowRight, Check, Bot } from "lucide-react";
 
 interface OnboardingModalProps {
   isOpen: boolean;
@@ -20,7 +20,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   if (!isOpen) return null;
 
   const subjects = [
-    "Computer Science & Networks",
+    "Computer Science & Systems",
     "Calculus & Linear Algebra",
     "Physics & Engineering",
     "Biology & Medicine",
@@ -28,61 +28,62 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-150">
-      <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 shadow-2xl space-y-6 text-slate-100 relative">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+      <div className="w-full max-w-lg bg-[#0d131f] border border-slate-800 rounded-xl p-6 md:p-8 shadow-2xl space-y-6 text-slate-100 relative">
+        
         {/* Step indicator */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
+            <span className="text-xs font-mono px-2 py-0.5 rounded bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
               Step {step} of 3
             </span>
-            <span className="text-xs text-slate-400 font-medium">Quick Onboarding</span>
+            <span className="text-xs text-slate-400 font-medium">StudyDesk Welcome</span>
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Step 1: Welcome & Value Proposition */}
+        {/* Step 1: Welcome */}
         {step === 1 && (
           <div className="space-y-4 animate-in fade-in duration-200">
-            <div className="w-12 h-12 rounded-2xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center">
-              <Sparkles className="w-6 h-6" />
+            <div className="w-10 h-10 rounded-lg bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center">
+              <GraduationCap className="w-5 h-5" />
             </div>
             <div>
               <h3 className="text-xl font-bold text-white">
-                Welcome to AI Study Workspace
+                Welcome to StudyDock
               </h3>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                &ldquo;Read it. Watch it. Ask it. Understand it.&rdquo; Everything you need to master difficult university subjects on a single unified screen.
+                Your personal academic study desk: original textbook reading, linked YouTube lecture sync, and private AI tutoring grounded in your exact page numbers.
               </p>
             </div>
 
             <div className="space-y-2 pt-2">
-              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs flex items-center gap-3">
-                <span className="text-lg">📖</span>
+              <div className="p-3 rounded-lg bg-[#070b12] border border-slate-800 text-xs flex items-center gap-3">
+                <div className="p-2 rounded bg-indigo-500/10 text-indigo-400"><BookOpen className="w-4 h-4" /></div>
                 <div>
-                  <div className="font-semibold text-slate-200">Digital Textbook Reader</div>
-                  <div className="text-[11px] text-slate-400">Highlight, take notes, and jump by section.</div>
+                  <div className="font-semibold text-slate-200">Original PDF Textbook Reader</div>
+                  <div className="text-[11px] text-slate-400">Read your actual PDF with bookmarks and persistent highlights.</div>
                 </div>
               </div>
 
-              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs flex items-center gap-3">
-                <span className="text-lg">🎥</span>
+              <div className="p-3 rounded-lg bg-[#070b12] border border-slate-800 text-xs flex items-center gap-3">
+                <div className="p-2 rounded bg-rose-500/10 text-rose-400"><Youtube className="w-4 h-4" /></div>
                 <div>
-                  <div className="font-semibold text-slate-200">Synchronized YouTube Lectures</div>
-                  <div className="text-[11px] text-slate-400">Timestamps mapped directly to textbook pages.</div>
+                  <div className="font-semibold text-slate-200">Synchronized Video Lectures</div>
+                  <div className="text-[11px] text-slate-400">Timestamped transcripts mapped directly to course concepts.</div>
                 </div>
               </div>
 
-              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs flex items-center gap-3">
-                <span className="text-lg">🤖</span>
+              <div className="p-3 rounded-lg bg-[#070b12] border border-slate-800 text-xs flex items-center gap-3">
+                <div className="p-2 rounded bg-purple-500/10 text-purple-400"><Bot className="w-4 h-4" /></div>
                 <div>
                   <div className="font-semibold text-slate-200">Context-Aware AI Academic Tutor</div>
-                  <div className="text-[11px] text-slate-400">Provides grounded citations and 10 learning modes.</div>
+                  <div className="text-[11px] text-slate-400">Grounded answers with [Textbook — p.X] and [YouTube — MM:SS] citations.</div>
                 </div>
               </div>
             </div>
@@ -90,7 +91,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             <div className="pt-2">
               <button
                 onClick={() => setStep(2)}
-                className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30"
+                className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-2 shadow-sm"
               >
                 <span>Continue</span>
                 <ArrowRight className="w-4 h-4" />
@@ -99,13 +100,13 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
           </div>
         )}
 
-        {/* Step 2: Choose Subject */}
+        {/* Step 2: Focus Area Selection */}
         {step === 2 && (
           <div className="space-y-4 animate-in fade-in duration-200">
             <div>
-              <h3 className="text-xl font-bold text-white">Choose Primary Subject</h3>
+              <h3 className="text-lg font-bold text-white">Select Your Primary Focus</h3>
               <p className="text-xs text-slate-400 mt-1">
-                Select the topic you are currently preparing for:
+                Customize your initial AI tutor prompts and practice quizzes for your field of study.
               </p>
             </div>
 
@@ -114,10 +115,10 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 <button
                   key={sub}
                   onClick={() => setSelectedSubject(sub)}
-                  className={`w-full text-left p-3 rounded-2xl border transition-all text-xs font-medium flex items-center justify-between ${
+                  className={`w-full p-3 rounded-lg border text-left text-xs font-medium flex items-center justify-between transition-all ${
                     selectedSubject === sub
-                      ? "bg-indigo-950/50 border-indigo-500 text-indigo-200 shadow-sm"
-                      : "bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700"
+                      ? "bg-indigo-600/20 border-indigo-500 text-white"
+                      : "bg-[#070b12] border-slate-800 text-slate-300 hover:border-slate-700"
                   }`}
                 >
                   <span>{sub}</span>
@@ -126,34 +127,35 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
               ))}
             </div>
 
-            <div className="flex items-center gap-2 pt-2">
+            <div className="flex gap-2 pt-2">
               <button
                 onClick={() => setStep(1)}
-                className="px-4 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+                className="px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
               >
                 Back
               </button>
               <button
                 onClick={() => setStep(3)}
-                className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30"
+                className="flex-1 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-sm"
               >
-                <span>Next: Complete Setup</span>
+                <span>Continue</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           </div>
         )}
 
-        {/* Step 3: Launch Workspace */}
+        {/* Step 3: Ready */}
         {step === 3 && (
-          <div className="space-y-4 animate-in fade-in duration-200 text-center py-2">
-            <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center mx-auto">
-              <Check className="w-7 h-7" />
+          <div className="space-y-4 animate-in fade-in duration-200 text-center py-4">
+            <div className="w-12 h-12 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center mx-auto">
+              <Check className="w-6 h-6" />
             </div>
-            <div>
-              <h3 className="text-xl font-bold text-white">Your Workspace is Ready!</h3>
-              <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                Your learning workspace is active. Upload your textbook or course materials to start reading with AI citations and synchronized video lectures.
+
+            <div className="space-y-1">
+              <h3 className="text-xl font-bold text-white">Your Workspace is Ready</h3>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                Open your textbook on the left, watch lectures top-right, and ask your private AI tutor on the bottom-right.
               </p>
             </div>
 
@@ -163,14 +165,14 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                   onComplete();
                   onClose();
                 }}
-                className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2"
+                className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm"
               >
-                <span>Start Studying Now</span>
-                <ArrowRight className="w-4 h-4" />
+                Enter Study Workspace
               </button>
             </div>
           </div>
         )}
+
       </div>
     </div>
   );

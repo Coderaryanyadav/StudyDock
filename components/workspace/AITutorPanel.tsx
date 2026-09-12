@@ -64,18 +64,21 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
   const [inputQuestion, setInputQuestion] = useState<string>("");
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Auto scroll to bottom
+  // Auto scroll only internal chat container, without scrolling window/page
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, isStreaming]);
+    if (messages.length > 1 || isStreaming) {
+      scrollToBottom();
+    }
+  }, [messages.length, isStreaming]);
 
   // Handle external prompt passed from textbook selection or video button
   useEffect(() => {
@@ -278,7 +281,7 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
       </div>
 
       {/* Messages Scroll Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+      <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-3.5 space-y-3 custom-scrollbar">
         {messages.map((message) => {
           const isAi = message.sender === "ai";
           return (
@@ -423,7 +426,6 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
             </div>
           );
         })}
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Suggested Prompts Bar */}

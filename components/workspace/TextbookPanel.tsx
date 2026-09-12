@@ -55,6 +55,13 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
 
   const contentRef = useRef<HTMLDivElement>(null);
 
+  // Reset scroll position to top when page changes
+  useEffect(() => {
+    if (contentRef.current) {
+      contentRef.current.scrollTop = 0;
+    }
+  }, [activePageNumber]);
+
   // Jump to page if targetCitationPage is triggered
   useEffect(() => {
     if (targetCitationPage && targetCitationPage !== activePageNumber) {

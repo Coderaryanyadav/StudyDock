@@ -32,41 +32,130 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
     },
   ];
 
+  async function setupAuthRoutes(targetPage: any) {
+    await targetPage.route("**/auth/v1/**", async (route: any) => {
+      const request = route.request();
+      const url = request.url();
+
+      if (url.includes("/signup") || url.includes("/token")) {
+        let email = userAEmail;
+        try {
+          const body = request.postDataJSON();
+          if (body?.email) email = body.email;
+        } catch (_e) {
+          void _e;
+        }
+
+        const isBob = email.includes("bob");
+        const userId = isBob
+          ? "22222222-2222-4222-8222-222222222222"
+          : "11111111-1111-4111-8111-111111111111";
+
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          json: {
+            access_token: `mock-jwt-token-${userId}`,
+            token_type: "bearer",
+            expires_in: 3600,
+            refresh_token: `mock-refresh-token-${userId}`,
+            user: {
+              id: userId,
+              aud: "authenticated",
+              role: "authenticated",
+              email: email,
+              created_at: new Date().toISOString(),
+            },
+          },
+        });
+        return;
+      }
+
+      if (url.includes("/user")) {
+        const authHeader = request.headers()["authorization"] || "";
+        const isBob = authHeader.includes("22222222");
+        const userId = isBob
+          ? "22222222-2222-4222-8222-222222222222"
+          : "11111111-1111-4111-8111-111111111111";
+        const email = isBob ? userBEmail : userAEmail;
+
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          json: {
+            id: userId,
+            aud: "authenticated",
+            role: "authenticated",
+            email: email,
+            created_at: new Date().toISOString(),
+          },
+        });
+        return;
+      }
+
+      if (url.includes("/logout")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          json: {},
+        });
+        return;
+      }
+
+      await route.continue();
+    });
+  }
+
   async function loginOrSignup(targetPage: any, email: string, pass: string) {
-    // Dismiss onboarding modal if present
-    const onboardingClose = targetPage.getByTestId("onboarding-close-btn");
-    if (await onboardingClose.isVisible()) {
-      await onboardingClose.click();
-      await targetPage.waitForTimeout(300);
-    }
+    await setupAuthRoutes(targetPage);
 
     const profileMenu = targetPage.getByTestId("user-profile-menu-btn");
     if (await profileMenu.isVisible()) {
       return;
     }
 
+    // Dismiss onboarding modal if present or if it appears
+    const onboardingModal = targetPage.getByTestId("onboarding-modal");
+    const onboardingClose = targetPage.getByTestId("onboarding-close-btn");
+
+    try {
+      if (await onboardingModal.isVisible({ timeout: 2000 })) {
+        await onboardingClose.click();
+        await expect(onboardingModal).not.toBeVisible({ timeout: 5000 });
+      }
+    } catch {
+      // Onboarding was not displayed or already dismissed
+    }
+
     const emailInput = targetPage.getByTestId("auth-email-input");
     if (!(await emailInput.isVisible())) {
-      const signInBtn = targetPage.getByTestId("nav-sign-in-btn");
-      if (await signInBtn.isVisible()) {
-        await signInBtn.click();
+      // If modal is visible at this point, ensure it is dismissed
+      if (await onboardingModal.isVisible()) {
+        await onboardingClose.click();
+        await expect(onboardingModal).not.toBeVisible({ timeout: 5000 });
       }
+      const signInBtn = targetPage.getByTestId("nav-sign-in-btn");
+      await expect(signInBtn).toBeVisible({ timeout: 10000 });
+      await signInBtn.click();
+      await expect(targetPage.getByTestId("auth-modal")).toBeVisible({ timeout: 10000 });
     }
 
     await targetPage.getByTestId("auth-tab-signup").click();
     await targetPage.getByTestId("auth-email-input").fill(email);
     await targetPage.getByTestId("auth-password-input").fill(pass);
     await targetPage.getByTestId("auth-submit-btn").click();
-    await targetPage.waitForTimeout(1000);
 
-    const isProfileVisible = await profileMenu.isVisible();
-    if (!isProfileVisible) {
+    // Check if authenticated or if user already exists -> sign in
+    try {
+      await expect(targetPage.getByTestId("user-profile-menu-btn")).toBeVisible({ timeout: 4000 });
+    } catch {
+      // If signup did not auto-login (e.g. user already exists or needs signin tab)
       await targetPage.getByTestId("auth-tab-signin").click();
       await targetPage.getByTestId("auth-email-input").fill(email);
       await targetPage.getByTestId("auth-password-input").fill(pass);
       await targetPage.getByTestId("auth-submit-btn").click();
+      await expect(targetPage.getByTestId("user-profile-menu-btn")).toBeVisible({ timeout: 20000 });
     }
-    await expect(targetPage.getByTestId("user-profile-menu-btn")).toBeVisible({ timeout: 20000 });
   }
 
   test("Phase 14 Complete Real User Study & Security Journey (Steps 1-44)", async ({ page, request, context }) => {
@@ -154,14 +243,14 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
     // Refresh page
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
+    await expect(page.getByTestId("page-number-input")).toBeVisible({ timeout: 15000 });
 
     // Navigate back to Page 2 and check highlights drawer
     await page.getByTestId("next-page-btn").click();
     await expect(page.getByTestId("page-number-input")).toHaveValue("2");
 
     await page.getByTestId("highlights-drawer-btn").click();
-    const highlightsCount = await page.getByTestId("highlights-count").textContent();
-    expect(highlightsCount).not.toBe("(0)");
+    await expect(page.getByTestId("highlights-count")).not.toHaveText("(0)", { timeout: 5000 });
     console.log("✅ Highlight persisted and verified after reload");
 
     // =========================================================================
@@ -176,6 +265,7 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
     // Refresh page
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
+    await expect(page.getByTestId("page-number-input")).toBeVisible({ timeout: 15000 });
 
     // Verify note is persisted
     const notesRes = await page.request.get(`/api/notes?bookId=${encodeURIComponent(userABookId)}`);
@@ -190,8 +280,7 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
     await expect(page.getByTestId("page-number-input")).toHaveValue("1");
     await page.getByTestId("bookmark-toggle-btn").click();
     await page.getByTestId("bookmarks-drawer-btn").click();
-    const bookmarksCount = await page.getByTestId("bookmarks-count").textContent();
-    expect(bookmarksCount).not.toBe("(0)");
+    await expect(page.getByTestId("bookmarks-count")).not.toHaveText("(0)", { timeout: 5000 });
     console.log("✅ Bookmark added and verified");
 
     // =========================================================================

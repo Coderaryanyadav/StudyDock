@@ -58,7 +58,15 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { type, bookId, pageNumber, text, color, note, title, boundingRect, rects } = body;
+    const type = body.type;
+    const bookId = body.bookId;
+    const pageNumber = body.pageNumber;
+    const text = body.text || body.selectedText;
+    const color = body.color;
+    const note = body.note;
+    const title = body.title;
+    const boundingRect = body.boundingRect || body.positionData?.boundingRect;
+    const rects = body.rects || body.positionData?.rects;
 
     if (!bookId) {
       return NextResponse.json({ error: "Book ID is required." }, { status: 400 });

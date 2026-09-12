@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { X, Lock, Mail, AlertCircle, Loader2, CheckCircle2, GraduationCap } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
@@ -21,6 +21,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
+  const emailInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // Focus input on mount
+    const timer = setTimeout(() => {
+      emailInputRef.current?.focus();
+    }, 50);
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -69,7 +92,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="auth-modal-title"
+      data-testid="auth-modal"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <div className="w-full max-w-md bg-[#0d131f] border border-slate-800 rounded-xl p-6 sm:p-8 shadow-2xl space-y-5 text-slate-100 relative">
         
         {/* Header */}
@@ -79,7 +113,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <GraduationCap className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-white">
+              <h3 id="auth-modal-title" className="font-bold text-base text-white">
                 {mode === "signin" ? "Sign In to StudyDock" : "Create StudyDock Account"}
               </h3>
               <p className="text-xs text-slate-400">
@@ -91,6 +125,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </div>
           <button
             onClick={onClose}
+            aria-label="Close Authentication Modal"
+            data-testid="auth-close-btn"
             className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
           >
             <X className="w-5 h-5" />
@@ -153,6 +189,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <div className="relative">
               <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
               <input
+                ref={emailInputRef}
                 type="email"
                 required
                 data-testid="auth-email-input"

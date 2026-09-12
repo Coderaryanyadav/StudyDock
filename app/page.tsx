@@ -236,7 +236,6 @@ export default function Home() {
     const hasSeenOnboarding = safeLocalStorageGet("has_seen_onboarding", false);
     if (!hasSeenOnboarding) {
       setIsOnboardingModalOpen(true);
-      safeLocalStorageSet("has_seen_onboarding", true);
     }
   }, []);
 
@@ -553,8 +552,15 @@ export default function Home() {
 
       <OnboardingModal
         isOpen={isOnboardingModalOpen}
-        onClose={() => setIsOnboardingModalOpen(false)}
-        onComplete={() => setCurrentView("workspace")}
+        onClose={() => {
+          safeLocalStorageSet("has_seen_onboarding", true);
+          setIsOnboardingModalOpen(false);
+        }}
+        onComplete={() => {
+          safeLocalStorageSet("has_seen_onboarding", true);
+          setIsOnboardingModalOpen(false);
+          setCurrentView("workspace");
+        }}
       />
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { X, GraduationCap, BookOpen, Youtube, ArrowRight, Check, Bot } from "lucide-react";
 
 interface OnboardingModalProps {
@@ -16,6 +16,25 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
 }) => {
   const [step, setStep] = useState<number>(1);
   const [selectedSubject, setSelectedSubject] = useState<string>("Computer Science");
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // Focus modal container on mount
+    modalRef.current?.focus();
+
+    // Escape key listener
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -27,26 +46,56 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     "Economics & Finance",
   ];
 
+  const handleFinish = () => {
+    onComplete();
+    onClose();
+  };
+
   return (
-    <div data-testid="onboarding-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="w-full max-w-lg bg-[#0d131f] border border-slate-800 rounded-xl p-6 md:p-8 shadow-2xl space-y-6 text-slate-100 relative">
-        
-        {/* Step indicator */}
+    <div
+      data-testid="onboarding-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="onboarding-modal-title"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div
+        ref={modalRef}
+        tabIndex={-1}
+        className="w-full max-w-lg bg-[#0d131f] border border-slate-800 rounded-xl p-6 md:p-8 shadow-2xl space-y-6 text-slate-100 relative outline-none focus:ring-1 focus:ring-indigo-500/50"
+      >
+        {/* Step indicator & Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2">
             <span className="text-xs font-mono px-2 py-0.5 rounded bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
               Step {step} of 3
             </span>
-            <span className="text-xs text-slate-400 font-medium">StudyDesk Welcome</span>
+            <span className="text-xs text-slate-400 font-medium">StudyDock Welcome</span>
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Close Onboarding"
-            data-testid="onboarding-close-btn"
-            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1">
+            {step < 3 && (
+              <button
+                onClick={onClose}
+                data-testid="onboarding-skip-btn"
+                className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded hover:bg-slate-800/60 transition-colors"
+              >
+                Skip
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              aria-label="Close Onboarding"
+              data-testid="onboarding-close-btn"
+              className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Step 1: Welcome */}
@@ -56,7 +105,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
               <GraduationCap className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-xl font-bold text-white">
+              <h3 id="onboarding-modal-title" className="text-xl font-bold text-white">
                 Welcome to StudyDock
               </h3>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
@@ -93,6 +142,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             <div className="pt-2">
               <button
                 onClick={() => setStep(2)}
+                data-testid="onboarding-continue-btn"
                 className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-2 shadow-sm"
               >
                 <span>Continue</span>
@@ -106,7 +156,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
         {step === 2 && (
           <div className="space-y-4 animate-in fade-in duration-200">
             <div>
-              <h3 className="text-lg font-bold text-white">Select Your Primary Focus</h3>
+              <h3 id="onboarding-modal-title" className="text-lg font-bold text-white">Select Your Primary Focus</h3>
               <p className="text-xs text-slate-400 mt-1">
                 Customize your initial AI tutor prompts and practice quizzes for your field of study.
               </p>
@@ -132,12 +182,14 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             <div className="flex gap-2 pt-2">
               <button
                 onClick={() => setStep(1)}
+                data-testid="onboarding-step2-back-btn"
                 className="px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
               >
                 Back
               </button>
               <button
                 onClick={() => setStep(3)}
+                data-testid="onboarding-step2-continue-btn"
                 className="flex-1 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-sm"
               >
                 <span>Continue</span>
@@ -155,7 +207,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             </div>
 
             <div className="space-y-1">
-              <h3 className="text-xl font-bold text-white">Your Workspace is Ready</h3>
+              <h3 id="onboarding-modal-title" className="text-xl font-bold text-white">Your Workspace is Ready</h3>
               <p className="text-xs text-slate-400 max-w-sm mx-auto">
                 Open your textbook on the left, watch lectures top-right, and ask your private AI tutor on the bottom-right.
               </p>
@@ -163,10 +215,8 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
 
             <div className="pt-4">
               <button
-                onClick={() => {
-                  onComplete();
-                  onClose();
-                }}
+                onClick={handleFinish}
+                data-testid="onboarding-complete-btn"
                 className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm"
               >
                 Enter Study Workspace
@@ -174,7 +224,6 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             </div>
           </div>
         )}
-
       </div>
     </div>
   );

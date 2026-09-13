@@ -1,9 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
+import { NextResponse } from "next/server";
+import { verifyBookOwnership } from "@/lib/supabase/auth";
 import { recordStudyEvent, startStudySession, heartbeatStudySession, endStudySession } from "@/lib/progress/service";
-import { StudyEventType } from "@/types";
+import { withApiHandler, RATE_LIMITS } from "@/lib/api/with-handler";
+import { z } from "zod";
 
-const VALID_EVENT_TYPES: StudyEventType[] = [
+export const runtime = "nodejs";
+
+const VALID_EVENT_TYPES = [
   "page_opened",
   "page_time",
   "page_completed",
@@ -16,78 +19,81 @@ const VALID_EVENT_TYPES: StudyEventType[] = [
   "quiz_started",
   "quiz_completed",
   "flashcard_reviewed",
-];
+] as const;
 
-export async function POST(req: NextRequest) {
-  try {
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
+const eventsPostSchema = z.object({
+  action: z.enum(["start_session", "heartbeat_session", "end_session"]).optional(),
+  eventType: z.enum(VALID_EVENT_TYPES).optional(),
+  bookId: z.string().string().min(1, "Invalid book ID format").optional().nullable(),
+  sessionId: z.string().string().min(1, "Invalid session ID format").optional(),
+  pageNumber: z.union([z.number(), z.string()]).optional().nullable(),
+  durationSeconds: z.union([z.number(), z.string()]).optional(),
+  metadata: z.record(z.any()).optional(),
+  activityType: z.string().max(100).optional(),
+});
 
-    if (!userId) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    }
+export const POST = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.STANDARD, // Using 120/min limit to accommodate heartbeats
+    bodySchema: eventsPostSchema,
+  },
+  async ({ userId, body }) => {
+    const data = body as z.infer<typeof eventsPostSchema>;
 
-    const body = await req.json();
-    const { action, eventType, bookId, sessionId, pageNumber, durationSeconds, metadata, activityType } = body;
-
-    // 1. Dedicated session actions
-    if (action === "start_session") {
-      if (bookId) {
-        const isOwner = await verifyBookOwnership(userId, bookId);
+    if (data.action === "start_session") {
+      if (data.bookId) {
+        const isOwner = await verifyBookOwnership(userId!, data.bookId);
         if (!isOwner) {
           return NextResponse.json({ error: "Access denied." }, { status: 403 });
         }
       }
-      const session = await startStudySession(userId, bookId, activityType || "reading");
+      const session = await startStudySession(userId!, data.bookId || undefined, data.activityType || "reading");
       if (!session) {
         return NextResponse.json({ error: "Failed to start study session." }, { status: 500 });
       }
       return NextResponse.json({ success: true, session });
     }
 
-    if (action === "heartbeat_session") {
-      if (!sessionId) {
+    if (data.action === "heartbeat_session") {
+      if (!data.sessionId) {
         return NextResponse.json({ error: "Session ID required for heartbeat." }, { status: 400 });
       }
-      const ok = await heartbeatStudySession(userId, sessionId, {
-        bookId,
-        pageNumber: pageNumber ? Number(pageNumber) : null,
-        durationIncrementSeconds: durationSeconds,
-        eventType,
+      const ok = await heartbeatStudySession(userId!, data.sessionId, {
+        bookId: data.bookId || undefined,
+        pageNumber: data.pageNumber ? Number(data.pageNumber) : null,
+        durationIncrementSeconds: data.durationSeconds ? Number(data.durationSeconds) : undefined,
+        eventType: data.eventType as any,
       });
       return NextResponse.json({ success: ok });
     }
 
-    if (action === "end_session") {
-      if (!sessionId) {
+    if (data.action === "end_session") {
+      if (!data.sessionId) {
         return NextResponse.json({ error: "Session ID required to end session." }, { status: 400 });
       }
-      const ok = await endStudySession(userId, sessionId);
+      const ok = await endStudySession(userId!, data.sessionId);
       return NextResponse.json({ success: ok });
     }
 
-    // 2. Standard Study Event recording
-    if (!eventType || !VALID_EVENT_TYPES.includes(eventType)) {
-      return NextResponse.json(
-        { error: `Invalid or missing eventType. Must be one of: ${VALID_EVENT_TYPES.join(", ")}` },
-        { status: 400 }
-      );
+    if (!data.eventType) {
+      return NextResponse.json({ error: "Invalid or missing eventType." }, { status: 400 });
     }
 
-    if (bookId) {
-      const isOwner = await verifyBookOwnership(userId, bookId);
+    if (data.bookId) {
+      const isOwner = await verifyBookOwnership(userId!, data.bookId);
       if (!isOwner) {
         return NextResponse.json({ error: "Access denied. You do not own this book." }, { status: 403 });
       }
     }
 
-    const recordedEvent = await recordStudyEvent(userId, {
-      bookId,
-      sessionId,
-      eventType,
-      pageNumber: pageNumber ? Number(pageNumber) : null,
-      durationSeconds: durationSeconds ? Number(durationSeconds) : 0,
-      metadata,
+    const recordedEvent = await recordStudyEvent(userId!, {
+      bookId: data.bookId || undefined,
+      sessionId: data.sessionId,
+      eventType: data.eventType as any,
+      pageNumber: data.pageNumber ? Number(data.pageNumber) : null,
+      durationSeconds: data.durationSeconds ? Number(data.durationSeconds) : 0,
+      metadata: data.metadata,
     });
 
     if (!recordedEvent) {
@@ -95,11 +101,5 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true, event: recordedEvent });
-  } catch (error: any) {
-    console.error("Study event tracking error:", error?.message || error);
-    return NextResponse.json(
-      { error: "Failed to record tracking event." },
-      { status: 500 }
-    );
   }
-}
+);

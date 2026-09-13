@@ -204,7 +204,7 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
     await page.getByTestId("import-subject-input").fill("Computer Science");
 
     // Submit upload
-    await page.getByTestId("import-submit-btn").click();
+    await page.getByTestId("submit-upload-btn").click();
 
     // Wait for processing modal to complete and workspace to load
     await expect(page.getByTestId("page-number-input")).toBeVisible({ timeout: 45000 });

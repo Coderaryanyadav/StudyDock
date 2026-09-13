@@ -1,0 +1,69 @@
+name: StudyDock Release Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    
+    # Environment variables required for tests
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps
+
+      - name: Security Audit (Production)
+        run: npm run audit:production
+        continue-on-error: false
+
+      - name: Typecheck
+        run: npm run typecheck
+        continue-on-error: false
+
+      - name: Lint
+        run: npm run lint
+        continue-on-error: false
+
+      - name: Unit Tests
+        run: npm run test
+        continue-on-error: false
+
+      - name: Database Tests
+        run: npm run test:db
+        continue-on-error: false
+
+      - name: Security Tests
+        run: npm run test:security
+        continue-on-error: false
+
+      - name: API Tests
+        run: npm run test:api
+        continue-on-error: false
+
+      - name: E2E Acceptance Tests
+        run: npm run test:e2e
+        continue-on-error: false
+
+      - name: Production Build
+        run: npm run build
+        continue-on-error: false

@@ -1,19 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/supabase/auth";
+import { NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { withApiHandler, RATE_LIMITS } from "@/lib/api/with-handler";
 
-export async function GET(req: NextRequest) {
-  try {
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Authentication required to view your library." },
-        { status: 401 }
-      );
-    }
-
+export const GET = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.STANDARD,
+  },
+  async ({ userId }) => {
     const supabase = await createServerSupabaseClient();
     if (!supabase) {
       return NextResponse.json(
@@ -54,11 +48,5 @@ export async function GET(req: NextRequest) {
         updatedAt: b.updated_at,
       })),
     });
-  } catch (error: any) {
-    console.error("Books API error:", error?.message || error);
-    return NextResponse.json(
-      { error: "Failed to retrieve books." },
-      { status: 500 }
-    );
   }
-}
+);

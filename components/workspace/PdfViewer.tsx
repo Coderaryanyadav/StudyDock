@@ -19,7 +19,7 @@ interface PdfViewerProps {
   totalPages?: number;
 }
 
-export const PdfViewer: React.FC<PdfViewerProps> = ({
+export const PdfViewer: React.FC<PdfViewerProps> = React.memo(({
   bookId,
   pageNumber,
   scale = 1.0,
@@ -338,4 +338,4 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       </div>
     </div>
   );
-};
+});

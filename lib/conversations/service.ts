@@ -38,7 +38,9 @@ export function sanitizeConversationTitle(input: string, maxLength = 50): string
  */
 export async function getConversationsForUser(
   userId: string,
-  bookId: string
+  bookId: string,
+  limit: number = 50,
+  offset: number = 0
 ): Promise<ConversationSummary[]> {
   if (!userId || !bookId) {
     throw new Error("User ID and Book ID are required to list conversations.");
@@ -59,7 +61,8 @@ export async function getConversationsForUser(
     .select("id, book_id, title, created_at, updated_at")
     .eq("user_id", userId)
     .eq("book_id", bookId)
-    .order("updated_at", { ascending: false });
+    .order("updated_at", { ascending: false })
+    .range(offset, offset + limit - 1);
 
   if (error) {
     console.error("Fetch conversations error:", error.message);

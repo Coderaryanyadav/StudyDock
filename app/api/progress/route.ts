@@ -1,18 +1,34 @@
-import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
+import { NextResponse } from "next/server";
+import { verifyBookOwnership } from "@/lib/supabase/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { getDashboardData } from "@/lib/progress/service";
+import { getDashboardData, recordStudyEvent } from "@/lib/progress/service";
+import { withApiHandler, RATE_LIMITS } from "@/lib/api/with-handler";
+import { z } from "zod";
 
-export async function GET(req: NextRequest) {
-  try {
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
+export const runtime = "nodejs";
 
-    if (!userId) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    }
+const progressPostSchema = z.object({
+  bookId: z.string().string().min(1, "Invalid book ID format").optional().nullable(),
+  durationSeconds: z.number().optional(),
+  pagesRead: z.number().optional(),
+  videoSeconds: z.number().optional(),
+  questionsAsked: z.number().optional(),
+  pageNumber: z.union([z.number(), z.string()]).optional().nullable(),
+});
 
-    const progress = await getDashboardData(userId);
+export const GET = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.STANDARD,
+  },
+  async ({ userId, req }) => {
+    // We already have auth from requireAuth, but need displayName from original auth fetch.
+    // However getDashboardData needs userId.
+    const progress = await getDashboardData(userId!);
+
+    // Re-fetch auth for display name if needed since withApiHandler only gives userId
+    const { authenticateRequest } = await import("@/lib/supabase/auth");
+    const auth = await authenticateRequest(req as any);
 
     return NextResponse.json({
       authenticated: true,
@@ -23,34 +39,25 @@ export async function GET(req: NextRequest) {
       },
       ...progress,
     });
-  } catch (error: any) {
-    console.error("Progress fetch error:", error?.message || error);
-    return NextResponse.json(
-      { error: "Failed to fetch study progress." },
-      { status: 500 }
-    );
   }
-}
+);
 
-export async function POST(req: NextRequest) {
-  try {
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
-
-    if (!userId) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    }
-
-    const body = await req.json();
-    const { bookId, durationSeconds, pagesRead, videoSeconds, questionsAsked, pageNumber } = body;
+export const POST = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.STANDARD,
+    bodySchema: progressPostSchema,
+  },
+  async ({ userId, body }) => {
+    const data = body as z.infer<typeof progressPostSchema>;
 
     let authorizedBookId: string | null = null;
-    if (bookId) {
-      const isOwner = await verifyBookOwnership(userId, bookId);
+    if (data.bookId) {
+      const isOwner = await verifyBookOwnership(userId!, data.bookId);
       if (!isOwner) {
         return NextResponse.json({ error: "Access denied. You do not own this textbook." }, { status: 403 });
       }
-      authorizedBookId = bookId;
+      authorizedBookId = data.bookId;
     }
 
     const supabase = await createServerSupabaseClient();
@@ -58,26 +65,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Database client unavailable." }, { status: 500 });
     }
 
-    // Clamp duration per heartbeat to prevent manufactured unlimited study time
-    const rawSeconds = Math.max(0, Math.round(durationSeconds || 0));
+    const rawSeconds = Math.max(0, Math.round(data.durationSeconds || 0));
     const clampedSeconds = Math.min(rawSeconds, 300); // 5 min max cap per request
 
     if (clampedSeconds > 0) {
-      const { recordStudyEvent } = await import("@/lib/progress/service");
-      await recordStudyEvent(userId, {
-        bookId: authorizedBookId,
+      await recordStudyEvent(userId!, {
+        bookId: authorizedBookId || undefined,
         eventType: "page_time",
-        pageNumber: pageNumber ? Number(pageNumber) : null,
+        pageNumber: data.pageNumber ? Number(data.pageNumber) : null,
         durationSeconds: clampedSeconds,
       });
     }
 
     return NextResponse.json({ success: true, durationSeconds: clampedSeconds });
-  } catch (error: any) {
-    console.error("Progress recording error:", error?.message || error);
-    return NextResponse.json(
-      { error: "Failed to record study session." },
-      { status: 500 }
-    );
   }
-}
+);

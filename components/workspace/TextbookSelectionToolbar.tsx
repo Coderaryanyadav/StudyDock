@@ -20,6 +20,7 @@ export const TextbookSelectionToolbar: React.FC<TextbookSelectionToolbarProps> =
 
   return (
     <div
+      data-testid="selection-toolbar"
       style={{
         position: "fixed",
         left: `${Math.max(16, Math.min(position.x, window.innerWidth - 380))}px`,

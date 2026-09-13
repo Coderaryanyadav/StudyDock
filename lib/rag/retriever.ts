@@ -2,6 +2,7 @@ import { Book, BookChunk, Citation, VideoLecture } from "@/types";
 import { generateEmbedding } from "./embeddings";
 import { createServerSupabaseClient } from "../supabase/server";
 import { wrapUntrustedDocumentContext, wrapSelectedText, wrapUserQuery, sanitizePromptText } from "../security/prompt-guard";
+import { Logger, LogState } from "@/lib/logger";
 
 export interface HybridSearchResult {
   chunk: BookChunk;
@@ -155,7 +156,11 @@ export async function retrieveRelevantContext(
     });
 
     if (error) {
-      console.error("pgvector match_book_chunks error:", error);
+      Logger.error("pgvector match_book_chunks error", {
+        state: LogState.RAG_UNAVAILABLE,
+        bookId: book.id,
+        error
+      });
       throw new Error("Vector search index query failed.");
     }
 
@@ -200,7 +205,11 @@ export async function retrieveRelevantContext(
       }
     }
   } catch (pgErr: any) {
-    console.error("Production pgvector retrieval failed:", pgErr?.message);
+    Logger.error("Production pgvector retrieval failed", {
+      state: LogState.RAG_UNAVAILABLE,
+      bookId: book.id,
+      error: pgErr?.message
+    });
     throw new Error(pgErr?.message || "StudyDock document search index is temporarily unavailable.");
   }
 

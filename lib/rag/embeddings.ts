@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-
+import { Logger, LogState } from "@/lib/logger";
 /**
  * Generates semantic vector embeddings (768 dimensions) using Google Gemini text-embedding-004
  * with retry logic and exponential backoff.
@@ -33,7 +33,10 @@ export async function generateEmbedding(
     } catch (error: any) {
       if (attempt === retries) {
         if (process.env.NODE_ENV !== "production") {
-          console.warn(`Embedding failed after ${retries} attempts, fallback to deterministic vector:`, error?.message);
+          Logger.warn(`Embedding failed after ${retries} attempts, fallback to deterministic vector`, {
+            state: LogState.EMBEDDING_FAILED,
+            error: error?.message
+          });
           return generateDeterministicVector(text, 768);
         }
         throw new Error(`Gemini embedding failed after ${retries} attempts: ${error?.message || "Unknown error"}`);
@@ -62,7 +65,11 @@ export async function generateBatchEmbeddings(
       try {
         results[index] = await generateEmbedding(texts[index]);
       } catch (err) {
-        console.error(`Error embedding chunk index ${index}:`, err);
+        Logger.error(`Error embedding chunk index ${index}`, {
+          state: LogState.EMBEDDING_FAILED,
+          chunkIndex: index,
+          error: err
+        });
         // In fallback or demo mode generate deterministic vector so batch is not stalled
         results[index] = generateDeterministicVector(texts[index], 768);
       }

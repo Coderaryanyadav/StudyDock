@@ -2,6 +2,7 @@ import * as crypto from "crypto";
 import { Book, BookChunk, BookPage, Chapter, Section } from "@/types";
 import { generateBatchEmbeddings } from "@/lib/rag/embeddings";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { Logger, LogState } from "@/lib/logger";
 
 export interface ProcessDocumentOptions {
   fileBuffer: Buffer;
@@ -353,7 +354,10 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
       }
       await parser.destroy();
     } catch (parseErr: any) {
-      console.warn("PDFParse library error, attempting stream extraction fallback:", parseErr?.message);
+      Logger.warn("PDFParse library error, attempting stream extraction fallback", {
+        state: LogState.PDF_PROCESSING,
+        error: parseErr?.message
+      });
       
       // Fallback: extract textual streams directly from PDF object stream
       const rawPdfString = fileBuffer.toString("latin1");
@@ -784,7 +788,12 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
       isScannedPdf: false,
     };
   } catch (error: any) {
-    console.error("PDF Processing pipeline error:", error?.message || error);
+    Logger.error("PDF Processing pipeline error", {
+      state: LogState.PDF_FAILED,
+      bookId,
+      userId,
+      error
+    });
 
     if (dbBookId) {
       try {
@@ -797,7 +806,11 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
           })
           .eq("id", dbBookId);
       } catch (markFailedErr) {
-        console.error("Failed to mark book as FAILED:", markFailedErr);
+        Logger.error("Failed to mark book as FAILED", {
+          state: LogState.DB_FAILED,
+          bookId: dbBookId,
+          error: markFailedErr
+        });
       }
     }
 

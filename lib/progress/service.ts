@@ -1,5 +1,6 @@
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { StudentProgress, StudyPlanItem, StudyEvent, StudySession, StudyEventType } from "@/types";
+import { Logger, LogState } from "@/lib/logger";
 
 // Maximum duration permitted per single event/heartbeat to prevent manufactured unlimited study time
 const MAX_EVENT_DURATION_SECONDS = 300; // 5 minutes max per single event
@@ -39,28 +40,39 @@ export async function recordStudyEvent(
     created_at: new Date().toISOString(),
   };
 
-  const { data, error } = await supabase
-    .from("study_events")
-    .insert(payload)
-    .select()
-    .single();
+  try {
+    const { data, error } = await supabase
+      .from("study_events")
+      .insert(payload)
+      .select()
+      .single();
 
-  if (error || !data) {
-    console.error("Failed to record study event:", error?.message || error);
+    if (error || !data) {
+      Logger.error("Failed to record study event", {
+        state: LogState.DB_FAILED,
+        error: error?.message || error
+      });
+      return null;
+    }
+
+    return {
+      id: data.id,
+      userId: data.user_id,
+      bookId: data.book_id,
+      sessionId: data.session_id,
+      eventType: data.event_type as StudyEventType,
+      pageNumber: data.page_number,
+      durationSeconds: data.duration_seconds,
+      metadata: data.metadata,
+      createdAt: data.created_at,
+    };
+  } catch (error: any) {
+    Logger.error("Failed to record study event", {
+      state: LogState.DB_FAILED,
+      error: error?.message || error
+    });
     return null;
   }
-
-  return {
-    id: data.id,
-    userId: data.user_id,
-    bookId: data.book_id,
-    sessionId: data.session_id,
-    eventType: data.event_type as StudyEventType,
-    pageNumber: data.page_number,
-    durationSeconds: data.duration_seconds,
-    metadata: data.metadata,
-    createdAt: data.created_at,
-  };
 }
 
 /**
@@ -75,48 +87,59 @@ export async function startStudySession(
   if (!supabase || !userId) return null;
 
   const now = new Date().toISOString();
-  const { data, error } = await supabase
-    .from("study_sessions")
-    .insert({
-      user_id: userId,
-      book_id: bookId || null,
-      started_at: now,
-      activity_type: activityType,
-      duration_seconds: 0,
-      duration_minutes: 0,
-      pages_read: 0,
-      pages_viewed: [],
-      pages_completed: [],
-      video_time_seconds: 0,
-      questions_asked: 0,
-      created_at: now,
-      updated_at: now,
-    })
-    .select()
-    .single();
+  try {
+    const { data, error } = await supabase
+      .from("study_sessions")
+      .insert({
+        user_id: userId,
+        book_id: bookId || null,
+        started_at: now,
+        activity_type: activityType,
+        duration_seconds: 0,
+        duration_minutes: 0,
+        pages_read: 0,
+        pages_viewed: [],
+        pages_completed: [],
+        video_time_seconds: 0,
+        questions_asked: 0,
+        created_at: now,
+        updated_at: now,
+      })
+      .select()
+      .single();
 
-  if (error || !data) {
-    console.error("Failed to start study session:", error?.message || error);
+    if (error || !data) {
+      Logger.error("Failed to start study session", {
+        state: LogState.DB_FAILED,
+        error: error?.message || error
+      });
+      return null;
+    }
+
+    return {
+      id: data.id,
+      userId: data.user_id,
+      bookId: data.book_id,
+      startedAt: data.started_at,
+      endedAt: data.ended_at,
+      durationSeconds: data.duration_seconds || 0,
+      durationMinutes: data.duration_minutes || 0,
+      pagesRead: data.pages_read || 0,
+      pagesViewed: data.pages_viewed || [],
+      pagesCompleted: data.pages_completed || [],
+      videoTimeSeconds: data.video_time_seconds || 0,
+      questionsAsked: data.questions_asked || 0,
+      activityType: data.activity_type || "reading",
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+    };
+  } catch (error: any) {
+    Logger.error("Failed to start study session", {
+      state: LogState.DB_FAILED,
+      error: error?.message || error
+    });
     return null;
   }
-
-  return {
-    id: data.id,
-    userId: data.user_id,
-    bookId: data.book_id,
-    startedAt: data.started_at,
-    endedAt: data.ended_at,
-    durationSeconds: data.duration_seconds || 0,
-    durationMinutes: data.duration_minutes || 0,
-    pagesRead: data.pages_read || 0,
-    pagesViewed: data.pages_viewed || [],
-    pagesCompleted: data.pages_completed || [],
-    videoTimeSeconds: data.video_time_seconds || 0,
-    questionsAsked: data.questions_asked || 0,
-    activityType: data.activity_type || "reading",
-    createdAt: data.created_at,
-    updatedAt: data.updated_at,
-  };
 }
 
 /**
@@ -304,20 +327,37 @@ export async function getProgressForUser(userId: string): Promise<StudentProgres
   if (!supabase || !userId) return defaultProgress;
 
   try {
-    // 1. Fetch study sessions for exact time and pages
-    const { data: sessions } = await supabase
-      .from("study_sessions")
-      .select("id, created_at, started_at, duration_seconds, duration_minutes, pages_read, pages_viewed, pages_completed, book_id")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false });
+    // Fire all independent queries concurrently to prevent waterfall delays
+    const [
+      sessionsRes,
+      eventsRes,
+      userConvosRes,
+      attemptsRes,
+      flashcardsRes,
+      conceptsRes,
+      videoCountRes,
+      latestBookRes
+    ] = await Promise.all([
+      supabase.from("study_sessions").select("id, created_at, started_at, duration_seconds, duration_minutes, pages_read, pages_viewed, pages_completed, book_id").eq("user_id", userId).order("created_at", { ascending: false }),
+      supabase.from("study_events").select("id, session_id, event_type, page_number, duration_seconds, metadata, created_at, book_id").eq("user_id", userId).order("created_at", { ascending: false }).limit(100),
+      supabase.from("conversations").select("id").eq("user_id", userId),
+      supabase.from("quiz_attempts").select("id, created_at, started_at", { count: "exact" }).eq("user_id", userId),
+      supabase.from("flashcards").select("id, last_reviewed", { count: "exact" }).eq("user_id", userId).not("last_reviewed", "is", null),
+      supabase.from("student_concepts").select("*, concepts(name, category)").eq("user_id", userId),
+      supabase.from("videos").select("id", { count: "exact", head: true }).eq("user_id", userId),
+      supabase.from("books").select("id, title, subject, last_page_read, total_pages").eq("user_id", userId).order("updated_at", { ascending: false }).limit(1).maybeSingle()
+    ]);
 
-    // 2. Fetch tracking events
-    const { data: events } = await supabase
-      .from("study_events")
-      .select("id, session_id, event_type, page_number, duration_seconds, metadata, created_at, book_id")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(100);
+    const sessions = sessionsRes.data;
+    const events = eventsRes.data;
+    const userConvos = userConvosRes.data;
+    const attempts = attemptsRes.data;
+    const quizCount = attemptsRes.count;
+    const flashcardRows = flashcardsRes.data;
+    const flashcardsCount = flashcardsRes.count;
+    const conceptsData = conceptsRes.data;
+    const videoCount = videoCountRes.count;
+    const latestBook = latestBookRes.data;
 
     // Calculate total study time accurately
     let totalStudySeconds = 0;
@@ -344,7 +384,7 @@ export async function getProgressForUser(userId: string): Promise<StudentProgres
 
     const totalStudyMinutes = Math.floor(totalStudySeconds / 60);
 
-    // 3. Aggregate all real user activity timestamps to calculate streaks
+    // Aggregate all real user activity timestamps to calculate streaks
     const activityDates: string[] = [];
     if (sessions) {
       sessions.forEach((s) => s.started_at && activityDates.push(s.started_at));
@@ -353,12 +393,7 @@ export async function getProgressForUser(userId: string): Promise<StudentProgres
       events.forEach((e) => e.created_at && activityDates.push(e.created_at));
     }
 
-    // 4. Fetch questions count from user messages joined via conversations
-    const { data: userConvos } = await supabase
-      .from("conversations")
-      .select("id")
-      .eq("user_id", userId);
-
+    // Fetch questions count from user messages joined via conversations
     let questionsAsked = 0;
     const convoIds = (userConvos || []).map((c) => c.id);
     if (convoIds.length > 0) {
@@ -373,49 +408,15 @@ export async function getProgressForUser(userId: string): Promise<StudentProgres
       }
     }
 
-    // 5. Fetch quiz attempts
-    const { data: attempts, count: quizCount } = await supabase
-      .from("quiz_attempts")
-      .select("id, created_at, started_at", { count: "exact" })
-      .eq("user_id", userId);
-
     if (attempts) {
       attempts.forEach((a) => (a.started_at || a.created_at) && activityDates.push(a.started_at || a.created_at));
     }
-
-    // 6. Fetch flashcards review count
-    const { count: flashcardsCount, data: flashcardRows } = await supabase
-      .from("flashcards")
-      .select("id, last_reviewed", { count: "exact" })
-      .eq("user_id", userId)
-      .not("last_reviewed", "is", null);
 
     if (flashcardRows) {
       flashcardRows.forEach((f) => f.last_reviewed && activityDates.push(f.last_reviewed));
     }
 
     const { currentStreak, longestStreak } = calculateStreaks(activityDates);
-
-    // 7. Concepts from student_concepts joined to concepts table
-    const { data: conceptsData } = await supabase
-      .from("student_concepts")
-      .select("*, concepts(name, category)")
-      .eq("user_id", userId);
-
-    // 8. Videos count
-    const { count: videoCount } = await supabase
-      .from("videos")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId);
-
-    // 9. Active Book & Real Chapter Completion / Pages Read (NO FAKE FORMULAS!)
-    const { data: latestBook } = await supabase
-      .from("books")
-      .select("id, title, subject, last_page_read, total_pages")
-      .eq("user_id", userId)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .single();
 
     let pagesRead = 0;
     let chaptersCompleted = 0;
@@ -607,8 +608,11 @@ export async function getProgressForUser(userId: string): Promise<StudentProgres
       todayPlan,
       recentActivity,
     };
-  } catch (err) {
-    console.error("Progress calculation error:", err);
-    return defaultProgress;
+  } catch (err: any) {
+    Logger.error("Progress calculation error", {
+      state: LogState.DB_FAILED,
+      error: err
+    });
+    throw new Error("Failed to load dashboard data");
   }
 }

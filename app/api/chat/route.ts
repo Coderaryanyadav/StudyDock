@@ -1,9 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { LearningMode, Book, VideoLecture } from "@/types";
 import { retrieveRelevantContext } from "@/lib/rag/retriever";
 import { streamTutorResponse } from "@/lib/gemini/client";
-import { checkRateLimit, validateChatInput } from "@/lib/security/rate-limit";
-import { authenticateRequest, verifyBookOwnership, verifyConversationOwnership } from "@/lib/supabase/auth";
+import { verifyBookOwnership, verifyConversationOwnership } from "@/lib/supabase/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import {
   getConversationsForUser,
@@ -15,123 +14,98 @@ import {
 } from "@/lib/conversations/service";
 import { getBookForUser } from "@/lib/books/service";
 import { recordStudyEvent } from "@/lib/progress/service";
+import { withApiHandler, RATE_LIMITS } from "@/lib/api/with-handler";
+import { z } from "zod";
 
 export const runtime = "nodejs";
 
-export async function POST(req: NextRequest) {
-  try {
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
+const chatPostSchema = z.object({
+  action: z.enum(["create_conversation", "send_message"]).optional(),
+  bookId: z.string().string().min(1, "Invalid book ID"),
+  title: z.string().max(255).optional(), // For create_conversation
+  question: z.string().max(2000).optional(),
+  message: z.string().max(2000).optional(),
+  pageNumber: z.number().int().min(1).optional(),
+  selectedText: z.string().max(5000).optional(),
+  learningMode: z.enum(["explain", "summarize", "quiz", "flashcards", "socratic", "analyze"]).optional(),
+  videoTimestampSeconds: z.number().min(0).optional(),
+  conversationId: z.string().string().min(1).optional(),
+});
 
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Authentication required to query the AI Tutor." },
-        { status: 401 }
-      );
-    }
+const chatGetSchema = z.object({
+  bookId: z.string().string().min(1),
+  conversationId: z.string().string().min(1).optional(),
+  list: z.enum(["true", "false"]).optional(),
+});
 
-    const body = await req.json();
+const chatPatchSchema = z.object({
+  conversationId: z.string().string().min(1),
+  title: z.string().min(1).max(255),
+});
 
-    // Support dedicated action to create a new conversation thread
-    if (body.action === "create_conversation") {
-      const { bookId, title } = body;
-      if (!bookId) {
-        return NextResponse.json({ error: "Book ID is required." }, { status: 400 });
-      }
-      const isOwner = await verifyBookOwnership(userId, bookId);
+const chatDeleteSchema = z.object({
+  conversationId: z.string().string().min(1),
+});
+
+export const POST = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.AI_GENERATION, // 10 per minute
+    bodySchema: chatPostSchema,
+  },
+  async ({ userId, body }) => {
+    const data = body as z.infer<typeof chatPostSchema>;
+
+    if (data.action === "create_conversation") {
+      const isOwner = await verifyBookOwnership(userId!, data.bookId);
       if (!isOwner) {
         return NextResponse.json({ error: "Access denied." }, { status: 403 });
       }
-      const newConv = await createConversation(userId, bookId, title);
+      const newConv = await createConversation(userId!, data.bookId, data.title || "New Conversation");
       return NextResponse.json({ success: true, conversation: newConv });
     }
 
-    // Rate Limiting: Max 30 chat requests per minute per IP
-    const ip = req.headers.get("x-forwarded-for") || "local-client";
-    const limitCheck = checkRateLimit(`chat-${ip}`, { limit: 30, windowMs: 60 * 1000 });
-    if (!limitCheck.allowed) {
-      return NextResponse.json(
-        { error: "Too many AI Tutor requests. Please pause before sending another question." },
-        { status: 429, headers: { "Retry-After": limitCheck.resetInSec.toString() } }
-      );
+    const rawQ = data.question || data.message || "";
+    const question = rawQ.trim();
+    if (!question) {
+      return NextResponse.json({ error: "Question cannot be empty." }, { status: 400 });
     }
 
-    // Validate input constraints
-    const validation = validateChatInput(body);
-    if (!validation.isValid) {
-      return NextResponse.json(
-        { error: validation.error || "Invalid request parameters." },
-        { status: 400 }
-      );
-    }
-
-    const {
-      question: rawQuestion,
-      message: rawMessage,
-      pageNumber = 1,
-      selectedText,
-      learningMode = "explain",
-      videoTimestampSeconds,
-      bookId,
-      conversationId,
-    } = body;
-    const question = (rawQuestion || rawMessage || "").trim();
-
-    if (!bookId) {
-      return NextResponse.json({ error: "Book ID is required." }, { status: 400 });
-    }
-
-    // Verify ownership of the book
-    const isOwner = await verifyBookOwnership(userId, bookId);
+    const isOwner = await verifyBookOwnership(userId!, data.bookId);
     if (!isOwner) {
-      return NextResponse.json(
-        { error: "Access denied. You do not have permission to query this textbook." },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: "Access denied." }, { status: 403 });
     }
 
-    // If conversation ID is specified, verify ownership
-    let activeConvId = conversationId;
+    let activeConvId = data.conversationId;
     if (activeConvId) {
-      const isConvOwner = await verifyConversationOwnership(userId, activeConvId, bookId);
+      const isConvOwner = await verifyConversationOwnership(userId!, activeConvId, data.bookId);
       if (!isConvOwner) {
-        return NextResponse.json(
-          { error: "Access denied. You do not have permission to access this conversation." },
-          { status: 403 }
-        );
+        return NextResponse.json({ error: "Access denied to conversation." }, { status: 403 });
       }
     } else {
-      // Create new conversation automatically if none active
-      const newConv = await createConversation(userId, bookId, question.slice(0, 50));
+      const newConv = await createConversation(userId!, data.bookId, question.slice(0, 50));
       if (newConv) {
         activeConvId = newConv.id;
       }
     }
 
-    // Resolve Target Book Context Authoritatively from Database
-    const targetBook: Book | null = await getBookForUser(userId, bookId);
-    let targetVideo: VideoLecture | undefined = undefined;
-
+    const targetBook: Book | null = await getBookForUser(userId!, data.bookId);
     if (!targetBook) {
-      return NextResponse.json(
-        { error: "Target book could not be found or you do not have permission to access it." },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Book not found." }, { status: 404 });
     }
 
+    let targetVideo: VideoLecture | undefined = undefined;
     const supabase = await createServerSupabaseClient();
     if (supabase) {
       const { data: bookRecord } = await supabase
         .from("books")
         .select("youtube_url, video_title")
-        .eq("id", bookId)
+        .eq("id", data.bookId)
         .eq("user_id", userId)
         .single();
 
       if (bookRecord?.youtube_url) {
-        const match = bookRecord.youtube_url.match(
-          /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/
-        );
+        const match = bookRecord.youtube_url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/);
         if (match) {
           targetVideo = {
             id: `vid-${match[1]}`,
@@ -147,37 +121,26 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!targetBook) {
-      return NextResponse.json(
-        { error: "Target book could not be found or database is unavailable." },
-        { status: 404 }
-      );
-    }
-
-    // Fail-Closed Grounded RAG Context Retrieval
     const ragContext = await retrieveRelevantContext(
       question,
       targetBook,
-      pageNumber,
-      selectedText,
+      data.pageNumber || 1,
+      data.selectedText,
       targetVideo,
-      videoTimestampSeconds,
-      userId
+      data.videoTimestampSeconds,
+      userId!
     );
 
-    // Save user message immediately to conversation
     if (activeConvId) {
-      await saveMessage(userId, activeConvId, "user", question, learningMode);
-      // Log tracking event
-      await recordStudyEvent(userId, {
-        bookId,
+      await saveMessage(userId!, activeConvId, "user", question, data.learningMode || "explain");
+      await recordStudyEvent(userId!, {
+        bookId: data.bookId,
         eventType: "question_asked",
-        pageNumber: Number(pageNumber) || 1,
-        metadata: { conversationId: activeConvId, learningMode },
+        pageNumber: data.pageNumber || 1,
+        metadata: { conversationId: activeConvId, learningMode: data.learningMode },
       }).catch(() => {});
     }
 
-    // Streaming Response with SSE
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
@@ -185,56 +148,43 @@ export async function POST(req: NextRequest) {
           await streamTutorResponse(
             question,
             ragContext,
-            learningMode as LearningMode,
+            (data.learningMode as LearningMode) || "explain",
             {
               onChunk: (chunk) => {
                 const payload = JSON.stringify({ type: "chunk", text: chunk });
                 controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
               },
               onComplete: async (fullText) => {
-                // Save AI Assistant response message and citations to database
                 if (activeConvId) {
                   await saveMessage(
-                    userId,
+                    userId!,
                     activeConvId,
                     "ai",
                     fullText,
-                    learningMode,
+                    data.learningMode || "explain",
                     ragContext.citations
                   );
                 }
-
                 const payload = JSON.stringify({
                   type: "done",
                   fullText,
                   conversationId: activeConvId,
                   citations: ragContext.citations,
                   retrievalMode: ragContext.retrievalMode,
-                  suggestedFollowUps: [
-                    "Explain simpler",
-                    "Give real-world example",
-                    "Quiz me on this",
-                    "Create flashcards",
-                  ],
+                  suggestedFollowUps: ["Explain simpler", "Give real-world example", "Quiz me on this", "Create flashcards"],
                 });
                 controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
                 controller.close();
               },
               onError: (err) => {
-                const payload = JSON.stringify({
-                  type: "error",
-                  error: "An error occurred while generating the tutor explanation.",
-                });
+                const payload = JSON.stringify({ type: "error", error: "An error occurred." });
                 controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
                 controller.close();
               },
             }
           );
-        } catch (streamError: any) {
-          const payload = JSON.stringify({
-            type: "error",
-            error: "Failed to generate AI response. Please try again.",
-          });
+        } catch (streamError) {
+          const payload = JSON.stringify({ type: "error", error: "Failed to generate AI response." });
           controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
           controller.close();
         }
@@ -247,52 +197,36 @@ export async function POST(req: NextRequest) {
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
       },
-    });
-  } catch (error: any) {
-    console.error("Chat API error:", error?.message || error);
-    return NextResponse.json(
-      { error: "An unexpected error occurred. Please try again." },
-      { status: 500 }
-    );
+    }) as any;
   }
-}
+);
 
-export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const bookId = searchParams.get("bookId");
-    const conversationId = searchParams.get("conversationId");
-    const listOnly = searchParams.get("list") === "true";
+export const GET = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.STANDARD,
+    querySchema: chatGetSchema,
+  },
+  async ({ userId, query }) => {
+    const { bookId, conversationId, list } = query as z.infer<typeof chatGetSchema>;
+    const listOnly = list === "true";
 
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
-
-    if (!userId) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    }
-
-    if (!bookId) {
-      return NextResponse.json({ error: "Book ID is required." }, { status: 400 });
-    }
-
-    const isOwner = await verifyBookOwnership(userId, bookId);
+    const isOwner = await verifyBookOwnership(userId!, bookId);
     if (!isOwner) {
       return NextResponse.json({ error: "Access denied." }, { status: 403 });
     }
 
-    // Return conversation list for this book
     if (listOnly) {
-      const conversations = await getConversationsForUser(userId, bookId);
+      const conversations = await getConversationsForUser(userId!, bookId);
       return NextResponse.json({ success: true, conversations });
     }
 
-    // Return messages for a specific conversation ID
     if (conversationId) {
-      const isConvOwner = await verifyConversationOwnership(userId, conversationId, bookId);
+      const isConvOwner = await verifyConversationOwnership(userId!, conversationId, bookId);
       if (!isConvOwner) {
         return NextResponse.json({ error: "Access denied to this conversation." }, { status: 403 });
       }
-      const record = await getConversationWithMessages(userId, conversationId);
+      const record = await getConversationWithMessages(userId!, conversationId);
       return NextResponse.json({
         success: true,
         conversationId: record?.id || conversationId,
@@ -301,8 +235,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Default: find the latest active conversation for this book
-    const conversations = await getConversationsForUser(userId, bookId);
+    const conversations = await getConversationsForUser(userId!, bookId);
     if (conversations.length === 0) {
       return NextResponse.json({
         success: true,
@@ -313,7 +246,7 @@ export async function GET(req: NextRequest) {
     }
 
     const latestConv = conversations[0];
-    const record = await getConversationWithMessages(userId, latestConv.id);
+    const record = await getConversationWithMessages(userId!, latestConv.id);
 
     return NextResponse.json({
       success: true,
@@ -322,64 +255,37 @@ export async function GET(req: NextRequest) {
       conversations,
       messages: record?.messages || [],
     });
-  } catch (error: any) {
-    console.error("Fetch chat history error:", error?.message || error);
-    return NextResponse.json({ error: "Failed to fetch chat history." }, { status: 500 });
   }
-}
+);
 
-export async function PATCH(req: NextRequest) {
-  try {
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
-
-    if (!userId) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    }
-
-    const body = await req.json();
-    const { conversationId, title } = body;
-
-    if (!conversationId || !title) {
-      return NextResponse.json({ error: "Conversation ID and title are required." }, { status: 400 });
-    }
-
-    const updated = await renameConversation(userId, conversationId, title);
+export const PATCH = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.STANDARD,
+    bodySchema: chatPatchSchema,
+  },
+  async ({ userId, body }) => {
+    const { conversationId, title } = body as z.infer<typeof chatPatchSchema>;
+    const updated = await renameConversation(userId!, conversationId, title);
     if (!updated) {
       return NextResponse.json({ error: "Failed to rename conversation." }, { status: 500 });
     }
-
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    console.error("Rename conversation error:", error?.message || error);
-    return NextResponse.json({ error: "Failed to rename conversation." }, { status: 500 });
   }
-}
+);
 
-export async function DELETE(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const conversationId = searchParams.get("conversationId");
-
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
-
-    if (!userId) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    }
-
-    if (!conversationId) {
-      return NextResponse.json({ error: "Conversation ID is required." }, { status: 400 });
-    }
-
-    const deleted = await deleteConversation(userId, conversationId);
+export const DELETE = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.STANDARD,
+    querySchema: chatDeleteSchema,
+  },
+  async ({ userId, query }) => {
+    const { conversationId } = query as z.infer<typeof chatDeleteSchema>;
+    const deleted = await deleteConversation(userId!, conversationId);
     if (!deleted) {
       return NextResponse.json({ error: "Failed to delete conversation." }, { status: 500 });
     }
-
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    console.error("Delete conversation error:", error?.message || error);
-    return NextResponse.json({ error: "Failed to delete conversation." }, { status: 500 });
   }
-}
+);

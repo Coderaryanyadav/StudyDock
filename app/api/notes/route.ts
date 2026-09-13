@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
+import { NextResponse } from "next/server";
+import { verifyBookOwnership } from "@/lib/supabase/auth";
 import {
   getNotesForBook,
   saveNote,
@@ -7,57 +7,65 @@ import {
   deleteNote,
 } from "@/lib/notes/service";
 import { recordStudyEvent } from "@/lib/progress/service";
+import { withApiHandler, RATE_LIMITS } from "@/lib/api/with-handler";
+import { z } from "zod";
 
-export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const bookId = searchParams.get("bookId");
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
+export const runtime = "nodejs";
 
-    if (!userId) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    }
+const notesGetSchema = z.object({
+  bookId: z.string().string().min(1, "Invalid book ID format"),
+});
 
-    if (!bookId) {
-      return NextResponse.json({ error: "Book ID is required." }, { status: 400 });
-    }
+const notesPostSchema = z.object({
+  bookId: z.string().string().min(1, "Invalid book ID format"),
+  pageNumber: z.number().int().min(1).optional(),
+  selectedText: z.string().max(10000).optional(),
+  content: z.string().min(1).max(10000, "Note content exceeds maximum length"),
+});
 
-    const isOwner = await verifyBookOwnership(userId, bookId);
+const notesPatchSchema = z.object({
+  id: z.string().string().min(1, "Invalid note ID format"),
+  content: z.string().min(1).max(10000, "Note content exceeds maximum length"),
+});
+
+const notesDeleteSchema = z.object({
+  id: z.string().string().min(1, "Invalid note ID format"),
+});
+
+export const GET = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.STANDARD,
+    querySchema: notesGetSchema,
+  },
+  async ({ userId, query }) => {
+    const { bookId } = query as z.infer<typeof notesGetSchema>;
+
+    const isOwner = await verifyBookOwnership(userId!, bookId);
     if (!isOwner) {
       return NextResponse.json({ error: "Access denied. You do not own this book." }, { status: 403 });
     }
 
-    const notes = await getNotesForBook(userId, bookId);
+    const notes = await getNotesForBook(userId!, bookId);
     return NextResponse.json({ success: true, notes });
-  } catch (error: any) {
-    console.error("Notes GET error:", error?.message || error);
-    return NextResponse.json({ error: "Failed to retrieve notes." }, { status: 500 });
   }
-}
+);
 
-export async function POST(req: NextRequest) {
-  try {
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
+export const POST = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.STANDARD,
+    bodySchema: notesPostSchema,
+  },
+  async ({ userId, body }) => {
+    const { bookId, pageNumber, selectedText, content } = body as z.infer<typeof notesPostSchema>;
 
-    if (!userId) {
-      return NextResponse.json({ error: "Authentication required to create notes." }, { status: 401 });
-    }
-
-    const body = await req.json();
-    const { bookId, pageNumber, selectedText, content } = body;
-
-    if (!bookId || !content) {
-      return NextResponse.json({ error: "Book ID and note content are required." }, { status: 400 });
-    }
-
-    const isOwner = await verifyBookOwnership(userId, bookId);
+    const isOwner = await verifyBookOwnership(userId!, bookId);
     if (!isOwner) {
       return NextResponse.json({ error: "Access denied. You do not own this book." }, { status: 403 });
     }
 
-    const note = await saveNote(userId, {
+    const note = await saveNote(userId!, {
       bookId,
       pageNumber: pageNumber || 1,
       selectedText,
@@ -68,8 +76,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Failed to persist note." }, { status: 500 });
     }
 
-    // Log tracking event
-    await recordStudyEvent(userId, {
+    await recordStudyEvent(userId!, {
       bookId,
       eventType: "note_created",
       pageNumber: pageNumber || 1,
@@ -77,64 +84,41 @@ export async function POST(req: NextRequest) {
     }).catch(() => {});
 
     return NextResponse.json({ success: true, note });
-  } catch (error: any) {
-    console.error("Notes POST error:", error?.message || error);
-    return NextResponse.json({ error: "Failed to create note." }, { status: 500 });
   }
-}
+);
 
-export async function PATCH(req: NextRequest) {
-  try {
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
+export const PATCH = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.STANDARD,
+    bodySchema: notesPatchSchema,
+  },
+  async ({ userId, body }) => {
+    const { id, content } = body as z.infer<typeof notesPatchSchema>;
 
-    if (!userId) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    }
-
-    const body = await req.json();
-    const { id, content } = body;
-
-    if (!id || !content) {
-      return NextResponse.json({ error: "Note ID and content are required." }, { status: 400 });
-    }
-
-    const updated = await updateNote(userId, id, content);
+    const updated = await updateNote(userId!, id, content);
     if (!updated) {
       return NextResponse.json({ error: "Failed to update note or note not found." }, { status: 404 });
     }
 
     return NextResponse.json({ success: true, note: updated });
-  } catch (error: any) {
-    console.error("Notes PATCH error:", error?.message || error);
-    return NextResponse.json({ error: "Failed to update note." }, { status: 500 });
   }
-}
+);
 
-export async function DELETE(req: NextRequest) {
-  try {
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
+export const DELETE = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.STANDARD,
+    querySchema: notesDeleteSchema,
+  },
+  async ({ userId, query }) => {
+    const { id } = query as z.infer<typeof notesDeleteSchema>;
 
-    if (!userId) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    }
-
-    const { searchParams } = new URL(req.url);
-    const id = searchParams.get("id");
-
-    if (!id) {
-      return NextResponse.json({ error: "Note ID is required." }, { status: 400 });
-    }
-
-    const deleted = await deleteNote(userId, id);
+    const deleted = await deleteNote(userId!, id);
     if (!deleted) {
       return NextResponse.json({ error: "Failed to delete note or note not found." }, { status: 404 });
     }
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    console.error("Notes DELETE error:", error?.message || error);
-    return NextResponse.json({ error: "Failed to delete note." }, { status: 500 });
   }
-}
+);

@@ -3,6 +3,7 @@ import { verifyBookOwnership } from "@/lib/supabase/auth";
 import { VideoLecture, VideoTranscriptSegment } from "@/types";
 import { extractYoutubeId, fetchYoutubeMetadata } from "@/lib/youtube/metadata";
 import { fetchYoutubeTranscript } from "@/lib/youtube/transcript";
+import { Logger, LogState } from "@/lib/logger";
 
 export async function getVideosForBook(
   userId: string,
@@ -77,7 +78,11 @@ export async function attachVideoToBook(
   // 1. Fetch real metadata via oEmbed standard
   const metadata = await fetchYoutubeMetadata(youtubeId);
   if (!metadata) {
-    console.warn(`Video ${youtubeId} metadata unavailable. Rejecting to prevent fabrication.`);
+    Logger.warn(`Video ${youtubeId} metadata unavailable. Rejecting to prevent fabrication.`, {
+      state: LogState.VIDEO_METADATA_UNAVAILABLE,
+      youtubeId,
+      bookId
+    });
     return null;
   }
 
@@ -90,7 +95,11 @@ export async function attachVideoToBook(
     .maybeSingle();
 
   if (existingVideo) {
-    console.warn(`Video ${youtubeId} already attached to book ${bookId}`);
+    Logger.warn(`Video ${youtubeId} already attached to book ${bookId}`, {
+      state: LogState.INFO,
+      youtubeId,
+      bookId
+    });
     return null;
   }
 
@@ -112,7 +121,10 @@ export async function attachVideoToBook(
     .single();
 
   if (error || !videoRow) {
-    console.error("Failed to insert video record:", error);
+    Logger.error("Failed to insert video record", {
+      state: LogState.DB_FAILED,
+      error
+    });
     return null;
   }
 

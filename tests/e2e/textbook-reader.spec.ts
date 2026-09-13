@@ -160,7 +160,7 @@ test.describe("StudyDock Production-Grade Textbook Reader Journey", () => {
     await loginOrSignup(page, userAEmail, userAPassword);
 
     // Open Upload Modal
-    const importBtn = page.getByTestId("nav-upload-btn");
+    const importBtn = page.getByTestId("nav-import-btn");
     await expect(importBtn).toBeVisible({ timeout: 10000 });
     await importBtn.click();
     await expect(page.getByTestId("upload-modal-content")).toBeVisible({ timeout: 10000 });

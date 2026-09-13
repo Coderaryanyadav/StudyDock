@@ -41,7 +41,7 @@ interface AITutorPanelProps {
   onLaunchFlashcardsFromAI?: () => void;
 }
 
-export const AITutorPanel: React.FC<AITutorPanelProps> = ({
+export const AITutorPanel: React.FC<AITutorPanelProps> = React.memo(({
   book,
   activePageNumber,
   activeVideo,
@@ -701,4 +701,4 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = ({
 
     </div>
   );
-};
+});

@@ -1,119 +1,136 @@
-import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
+import { NextResponse } from "next/server";
+import { verifyBookOwnership } from "@/lib/supabase/auth";
 import {
   attachVideoToBook,
   getVideosForBook,
   detachVideoFromBook,
 } from "@/lib/videos/service";
+import { withApiHandler, RATE_LIMITS } from "@/lib/api/with-handler";
+import { z } from "zod";
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const resolvedParams = await params;
-    const bookId = resolvedParams.id;
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
+const bookParamsSchema = z.object({
+  id: z.string().string().min(1, "Invalid book ID format"),
+});
 
-    if (!userId) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+const videoPostSchema = z.object({
+  youtubeUrl: z
+    .string()
+    .url("Must be a valid URL")
+    .max(500)
+    .refine((val) => {
+      // Basic SSRF and domain restrictions
+      const url = new URL(val);
+      const host = url.hostname.toLowerCase();
+      if (host === "localhost" || host === "127.0.0.1" || host.includes("internal")) return false;
+      if (url.protocol === "file:" || url.protocol === "javascript:") return false;
+      if (!host.includes("youtube.com") && !host.includes("youtu.be")) return false;
+      return true;
+    }, "Must be a valid public YouTube URL"),
+  title: z.string().max(255).optional(),
+});
+
+const videoDeleteSchema = z.object({
+  videoId: z.string().string().min(1).optional(),
+});
+
+export const POST = async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
+  const resolvedParams = await params;
+
+  return withApiHandler(
+    {
+      requireAuth: true,
+      rateLimit: RATE_LIMITS.STANDARD,
+      bodySchema: videoPostSchema,
+    },
+    async ({ userId, body }) => {
+      const parseResult = bookParamsSchema.safeParse(resolvedParams);
+      if (!parseResult.success) {
+        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.errors }, { status: 400 });
+      }
+      const bookId = parseResult.data.id;
+
+      const isOwner = await verifyBookOwnership(userId!, bookId);
+      if (!isOwner) {
+        return NextResponse.json({ error: "Access denied." }, { status: 403 });
+      }
+
+      const { youtubeUrl, title } = body as z.infer<typeof videoPostSchema>;
+
+      const video = await attachVideoToBook(userId!, bookId, youtubeUrl, title);
+      if (!video) {
+        return NextResponse.json({ error: "Invalid YouTube URL or failed to attach video." }, { status: 400 });
+      }
+
+      return NextResponse.json({
+        success: true,
+        video,
+      });
     }
+  )(req as any);
+};
 
-    const isOwner = await verifyBookOwnership(userId, bookId);
-    if (!isOwner) {
-      return NextResponse.json({ error: "Access denied." }, { status: 403 });
+export const GET = async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
+  const resolvedParams = await params;
+
+  return withApiHandler(
+    {
+      requireAuth: true,
+      rateLimit: RATE_LIMITS.STANDARD,
+    },
+    async ({ userId }) => {
+      const parseResult = bookParamsSchema.safeParse(resolvedParams);
+      if (!parseResult.success) {
+        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.errors }, { status: 400 });
+      }
+      const bookId = parseResult.data.id;
+
+      const isOwner = await verifyBookOwnership(userId!, bookId);
+      if (!isOwner) {
+        return NextResponse.json({ error: "Access denied." }, { status: 403 });
+      }
+
+      const videos = await getVideosForBook(userId!, bookId);
+      const video = videos.length > 0 ? videos[0] : null;
+
+      return NextResponse.json({
+        success: true,
+        video,
+      });
     }
+  )(req as any);
+};
 
-    const body = await req.json();
-    const { youtubeUrl, title } = body;
+export const DELETE = async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
+  const resolvedParams = await params;
 
-    if (!youtubeUrl || typeof youtubeUrl !== "string") {
-      return NextResponse.json({ error: "Valid YouTube URL is required." }, { status: 400 });
+  return withApiHandler(
+    {
+      requireAuth: true,
+      rateLimit: RATE_LIMITS.STANDARD,
+      querySchema: videoDeleteSchema,
+    },
+    async ({ userId, query }) => {
+      const parseResult = bookParamsSchema.safeParse(resolvedParams);
+      if (!parseResult.success) {
+        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.errors }, { status: 400 });
+      }
+      const bookId = parseResult.data.id;
+
+      const isOwner = await verifyBookOwnership(userId!, bookId);
+      if (!isOwner) {
+        return NextResponse.json({ error: "Access denied." }, { status: 403 });
+      }
+
+      const { videoId } = query as z.infer<typeof videoDeleteSchema>;
+
+      const videos = await getVideosForBook(userId!, bookId);
+      const targetId = videoId || (videos.length > 0 ? videos[0].id : null);
+
+      if (targetId) {
+        await detachVideoFromBook(userId!, targetId, bookId);
+      }
+
+      return NextResponse.json({ success: true });
     }
-
-    const video = await attachVideoToBook(userId, bookId, youtubeUrl, title);
-    if (!video) {
-      return NextResponse.json({ error: "Invalid YouTube URL or failed to attach video." }, { status: 400 });
-    }
-
-    return NextResponse.json({
-      success: true,
-      video,
-    });
-  } catch (error: any) {
-    console.error("Connect video error:", error?.message || error);
-    return NextResponse.json(
-      { error: "Failed to connect YouTube lecture." },
-      { status: 500 }
-    );
-  }
-}
-
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const resolvedParams = await params;
-    const bookId = resolvedParams.id;
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
-
-    if (!userId) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    }
-
-    const isOwner = await verifyBookOwnership(userId, bookId);
-    if (!isOwner) {
-      return NextResponse.json({ error: "Access denied." }, { status: 403 });
-    }
-
-    const videos = await getVideosForBook(userId, bookId);
-    const video = videos.length > 0 ? videos[0] : null;
-
-    return NextResponse.json({
-      success: true,
-      video,
-    });
-  } catch (error: any) {
-    console.error("Get video error:", error);
-    return NextResponse.json({ error: "Failed to fetch video." }, { status: 500 });
-  }
-}
-
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const resolvedParams = await params;
-    const bookId = resolvedParams.id;
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
-
-    if (!userId) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    }
-
-    const isOwner = await verifyBookOwnership(userId, bookId);
-    if (!isOwner) {
-      return NextResponse.json({ error: "Access denied." }, { status: 403 });
-    }
-
-    const { searchParams } = new URL(req.url);
-    const videoId = searchParams.get("videoId");
-
-    const videos = await getVideosForBook(userId, bookId);
-    const targetId = videoId || (videos.length > 0 ? videos[0].id : null);
-
-    if (targetId) {
-      await detachVideoFromBook(userId, targetId, bookId);
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (error: any) {
-    console.error("Delete video error:", error);
-    return NextResponse.json({ error: "Failed to delete video." }, { status: 500 });
-  }
-}
+  )(req as any);
+};

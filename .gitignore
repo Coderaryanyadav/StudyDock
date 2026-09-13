@@ -8,6 +8,10 @@
 /coverage
 test-results/
 playwright-report/
+blob-report/
+*.pdf
+*.webm
+*.png
 
 
 # next.js

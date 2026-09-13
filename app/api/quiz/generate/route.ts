@@ -1,46 +1,38 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { checkRateLimit } from "@/lib/security/rate-limit";
 import { sanitizePromptText } from "@/lib/security/prompt-guard";
-import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
+import { verifyBookOwnership } from "@/lib/supabase/auth";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { saveQuizWithQuestions } from "@/lib/quizzes/service";
 import { QuizQuestion } from "@/types";
+import { withApiHandler, RATE_LIMITS } from "@/lib/api/with-handler";
+import { z } from "zod";
 
-export async function POST(req: NextRequest) {
-  try {
-    const ip = req.headers.get("x-forwarded-for") || "local-client";
-    const limitCheck = checkRateLimit(`quiz-${ip}`, { limit: 20, windowMs: 60 * 1000 });
-    if (!limitCheck.allowed) {
-      return NextResponse.json(
-        { error: "Rate limit reached for quiz generation. Please wait a moment." },
-        { status: 429 }
-      );
-    }
+export const runtime = "nodejs";
 
-    const body = await req.json();
-    const { pageNumber, concept, contextText, bookId } = body;
+const quizGenerateSchema = z.object({
+  pageNumber: z.number().int().min(1).optional(),
+  concept: z.string().max(255).optional(),
+  contextText: z.string().max(10000).optional(),
+  bookId: z.string().string().min(1, "Invalid book ID format"),
+});
 
-    // 1. Strict Authentication & Book Ownership Verification
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
+export const POST = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.AI_GENERATION,
+    bodySchema: quizGenerateSchema,
+  },
+  async ({ userId, body }) => {
+    const { pageNumber, concept, contextText, bookId } = body as z.infer<typeof quizGenerateSchema>;
 
-    if (!userId) {
-      return NextResponse.json({ error: "Authentication required to generate quizzes." }, { status: 401 });
-    }
-
-    if (!bookId) {
-      return NextResponse.json({ error: "Book ID is required." }, { status: 400 });
-    }
-
-    const isOwner = await verifyBookOwnership(userId, bookId);
+    const isOwner = await verifyBookOwnership(userId!, bookId);
     if (!isOwner) {
       return NextResponse.json({ error: "Access denied. You do not own this textbook." }, { status: 403 });
     }
 
-    // 2. Resolve Textbook Page Context from DB if not directly provided
     let targetContext = contextText;
-    if (!targetContext || typeof targetContext !== "string" || targetContext.trim().length < 20) {
+    if (!targetContext || targetContext.trim().length < 20) {
       const supabase = await createServerSupabaseClient();
       if (supabase) {
         const { data: pageRecord } = await supabase
@@ -124,32 +116,32 @@ Return a JSON array of 3 questions with this exact JSON schema:
               options = item.options.map((opt: any, optIdx: number) => {
                 if (typeof opt === "object" && opt !== null) {
                   return {
-                    id: opt.id || `opt-${optIdx}`,
-                    text: String(opt.text || `Option ${optIdx + 1}`),
+                    id: String(opt.id || `opt-${optIdx}`).substring(0, 50),
+                    text: String(opt.text || `Option ${optIdx + 1}`).substring(0, 500),
                     isCorrect: Boolean(opt.isCorrect),
                   };
                 }
                 return {
                   id: `opt-${optIdx}`,
-                  text: String(opt),
+                  text: String(opt).substring(0, 500),
                   isCorrect: optIdx === (item.correctIndex ?? 0),
                 };
               });
             }
 
-            if (options.length < 2) continue;
+            if (options.length < 2 || options.length > 6) continue;
             const correctCount = options.filter((o) => o.isCorrect).length;
-            if (correctCount !== 1) continue; // Reject malformed question
+            if (correctCount !== 1) continue;
 
             formattedQuestions.push({
               id: `q-${Date.now()}-${i}`,
               bookId,
               chapterId: null,
               pageNumber: Number(pageNumber) || 1,
-              concept: String(item.concept || concept || "Core Concept"),
-              question: String(item.question),
+              concept: String(item.concept || concept || "Core Concept").substring(0, 255),
+              question: String(item.question).substring(0, 2000),
               options,
-              explanation: String(item.explanation || ""),
+              explanation: String(item.explanation || "").substring(0, 5000),
               difficulty: (item.difficulty as "easy" | "medium" | "hard") || "medium",
             });
           }
@@ -166,11 +158,10 @@ Return a JSON array of 3 questions with this exact JSON schema:
       );
     }
 
-    // 4. Persist quiz to database
     const savedQuizId = await saveQuizWithQuestions(
-      userId,
+      userId!,
       bookId,
-      `${concept || "Textbook"} Assessment`,
+      `${(concept || "Textbook").substring(0, 100)} Assessment`,
       formattedQuestions
     );
 
@@ -184,7 +175,7 @@ Return a JSON array of 3 questions with this exact JSON schema:
     const fullQuiz = {
       id: savedQuizId,
       bookId,
-      title: `${concept || "Textbook"} Assessment`,
+      title: `${(concept || "Textbook").substring(0, 100)} Assessment`,
       questions: formattedQuestions,
     };
 
@@ -196,12 +187,5 @@ Return a JSON array of 3 questions with this exact JSON schema:
       count: formattedQuestions.length,
       generatedFrom: "ai_context",
     });
-  } catch (error: any) {
-    console.error("Quiz API error:", error?.message || error);
-    return NextResponse.json(
-      { error: "Failed to generate quiz. Please try again." },
-      { status: 500 }
-    );
   }
-}
-
+);

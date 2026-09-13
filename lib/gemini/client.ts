@@ -3,6 +3,7 @@ import { LearningMode } from "@/types";
 import { LEARNING_MODES } from "@/lib/learning-modes";
 import { ProductionRagContext, buildProductionPrompt } from "@/lib/rag/retriever";
 import { RagContext } from "@/lib/rag/engine";
+import { Logger, LogState } from "@/lib/logger";
 
 export interface StreamCallbacks {
   onChunk: (text: string) => void;
@@ -54,7 +55,25 @@ export async function streamTutorResponse(
     });
 
     const prompt = buildProductionPrompt(question, context as ProductionRagContext, modeConfig.promptModifier);
-    const result = await model.generateContentStream(prompt);
+    let result;
+    let attempt = 1;
+    const maxRetries = 3;
+    const delayMs = 500;
+
+    while (attempt <= maxRetries) {
+      try {
+        result = await model.generateContentStream(prompt);
+        break; // Connection succeeded
+      } catch (err: any) {
+        if (attempt === maxRetries) {
+          throw err; // Out of retries
+        }
+        await new Promise((resolve) => setTimeout(resolve, delayMs * Math.pow(2, attempt - 1)));
+        attempt++;
+      }
+    }
+
+    if (!result) throw new Error("Failed to connect to Gemini API after retries.");
 
     let fullText = "";
     for await (const chunk of result.stream) {
@@ -70,7 +89,10 @@ export async function streamTutorResponse(
 
     callbacks.onComplete(fullText);
   } catch (error: any) {
-    console.error("Gemini API stream error:", error?.message || error);
+    Logger.error("Gemini API stream error", {
+      state: LogState.AI_UNAVAILABLE,
+      error: error?.message || error
+    });
     callbacks.onError(error instanceof Error ? error : new Error(String(error?.message || error)));
   }
 }

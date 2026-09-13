@@ -7,14 +7,16 @@ import { WorkspaceNavbar } from "@/components/navbar/WorkspaceNavbar";
 import { WorkspaceLayout } from "@/components/workspace/WorkspaceLayout";
 import { StudyDashboard } from "@/components/dashboard/StudyDashboard";
 import { LandingPage } from "@/components/landing/LandingPage";
-import { QuizModal } from "@/components/modals/QuizModal";
-import { FlashcardsModal } from "@/components/modals/FlashcardsModal";
-import { ShortcutsModal } from "@/components/modals/ShortcutsModal";
-import { DocumentUploadModal } from "@/components/modals/DocumentUploadModal";
-import { OnboardingModal } from "@/components/modals/OnboardingModal";
-import { CommandPaletteModal } from "@/components/modals/CommandPaletteModal";
-import { AuthModal } from "@/components/auth/AuthModal";
-import { LibraryModal } from "@/components/library/LibraryModal";
+import dynamic from "next/dynamic";
+
+const QuizModal = dynamic(() => import("@/components/modals/QuizModal").then(mod => mod.QuizModal));
+const FlashcardsModal = dynamic(() => import("@/components/modals/FlashcardsModal").then(mod => mod.FlashcardsModal));
+const ShortcutsModal = dynamic(() => import("@/components/modals/ShortcutsModal").then(mod => mod.ShortcutsModal));
+const DocumentUploadModal = dynamic(() => import("@/components/modals/DocumentUploadModal").then(mod => mod.DocumentUploadModal));
+const OnboardingModal = dynamic(() => import("@/components/modals/OnboardingModal").then(mod => mod.OnboardingModal));
+const CommandPaletteModal = dynamic(() => import("@/components/modals/CommandPaletteModal").then(mod => mod.CommandPaletteModal));
+const AuthModal = dynamic(() => import("@/components/auth/AuthModal").then(mod => mod.AuthModal));
+const LibraryModal = dynamic(() => import("@/components/library/LibraryModal").then(mod => mod.LibraryModal));
 import { safeLocalStorageGet, safeLocalStorageSet } from "@/lib/utils";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 

@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
+import { NextResponse } from "next/server";
+import { verifyBookOwnership } from "@/lib/supabase/auth";
 import {
   getHighlightsForBook,
   getBookmarksForBook,
@@ -11,30 +11,61 @@ import {
   deleteBookmark,
 } from "@/lib/annotations/service";
 import { recordStudyEvent } from "@/lib/progress/service";
+import { withApiHandler, RATE_LIMITS } from "@/lib/api/with-handler";
+import { z } from "zod";
 
-export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const bookId = searchParams.get("bookId");
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
+export const runtime = "nodejs";
 
-    if (!userId) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    }
+const getAnnotationsSchema = z.object({
+  bookId: z.string().string().min(1, "Invalid book ID format"),
+});
 
-    if (!bookId) {
-      return NextResponse.json({ error: "Book ID is required." }, { status: 400 });
-    }
+const postAnnotationSchema = z.object({
+  type: z.enum(["bookmark", "highlight"]),
+  bookId: z.string().string().min(1, "Invalid book ID format"),
+  pageNumber: z.number().int().min(1).optional(),
+  selectedText: z.string().max(10000).optional(),
+  text: z.string().max(10000).optional(),
+  color: z.string().max(20).optional(),
+  note: z.string().max(10000).optional(),
+  title: z.string().max(255).optional(),
+  boundingRect: z.any().optional(),
+  positionData: z.any().optional(),
+  rects: z.any().optional(),
+});
 
-    const isOwner = await verifyBookOwnership(userId, bookId);
+const patchAnnotationSchema = z.object({
+  id: z.string().string().min(1, "Invalid annotation ID format"),
+  type: z.enum(["bookmark", "highlight"]).optional(),
+  color: z.string().max(20).optional(),
+  note: z.string().max(10000).optional(),
+  title: z.string().max(255).optional(),
+});
+
+const deleteAnnotationSchema = z.object({
+  id: z.string().string().min(1, "Invalid annotation ID format").optional(),
+  type: z.enum(["bookmark", "highlight"]).optional(),
+  bookId: z.string().string().min(1, "Invalid book ID format").optional(),
+  pageNumber: z.union([z.number(), z.string()]).optional(),
+});
+
+export const GET = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.STANDARD,
+    querySchema: getAnnotationsSchema,
+  },
+  async ({ userId, query }) => {
+    const { bookId } = query as z.infer<typeof getAnnotationsSchema>;
+
+    const isOwner = await verifyBookOwnership(userId!, bookId);
     if (!isOwner) {
       return NextResponse.json({ error: "Access denied. You do not own this book." }, { status: 403 });
     }
 
     const [highlights, bookmarks] = await Promise.all([
-      getHighlightsForBook(userId, bookId),
-      getBookmarksForBook(userId, bookId),
+      getHighlightsForBook(userId!, bookId),
+      getBookmarksForBook(userId!, bookId),
     ]);
 
     return NextResponse.json({
@@ -42,43 +73,34 @@ export async function GET(req: NextRequest) {
       highlights,
       bookmarks,
     });
-  } catch (error: any) {
-    console.error("Annotations GET error:", error?.message || error);
-    return NextResponse.json({ error: "Failed to fetch annotations." }, { status: 500 });
   }
-}
+);
 
-export async function POST(req: NextRequest) {
-  try {
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
+export const POST = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.STANDARD,
+    bodySchema: postAnnotationSchema,
+  },
+  async ({ userId, body }) => {
+    const data = body as z.infer<typeof postAnnotationSchema>;
+    const type = data.type;
+    const bookId = data.bookId;
+    const pageNumber = data.pageNumber;
+    const text = data.text || data.selectedText;
+    const color = data.color;
+    const note = data.note;
+    const title = data.title;
+    const boundingRect = data.boundingRect || data.positionData?.boundingRect;
+    const rects = data.rects || data.positionData?.rects;
 
-    if (!userId) {
-      return NextResponse.json({ error: "Authentication required to save annotations." }, { status: 401 });
-    }
-
-    const body = await req.json();
-    const type = body.type;
-    const bookId = body.bookId;
-    const pageNumber = body.pageNumber;
-    const text = body.text || body.selectedText;
-    const color = body.color;
-    const note = body.note;
-    const title = body.title;
-    const boundingRect = body.boundingRect || body.positionData?.boundingRect;
-    const rects = body.rects || body.positionData?.rects;
-
-    if (!bookId) {
-      return NextResponse.json({ error: "Book ID is required." }, { status: 400 });
-    }
-
-    const isOwner = await verifyBookOwnership(userId, bookId);
+    const isOwner = await verifyBookOwnership(userId!, bookId);
     if (!isOwner) {
       return NextResponse.json({ error: "Access denied. You do not own this textbook." }, { status: 403 });
     }
 
     if (type === "bookmark") {
-      const bookmark = await saveBookmark(userId, {
+      const bookmark = await saveBookmark(userId!, {
         bookId,
         pageNumber: pageNumber || 1,
         title,
@@ -88,8 +110,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Failed to save bookmark." }, { status: 500 });
       }
 
-      // Log tracking event
-      await recordStudyEvent(userId, {
+      await recordStudyEvent(userId!, {
         bookId,
         eventType: "bookmark_created",
         pageNumber: pageNumber || 1,
@@ -103,7 +124,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing required highlight text." }, { status: 400 });
     }
 
-    const highlight = await saveHighlight(userId, {
+    const highlight = await saveHighlight(userId!, {
       bookId,
       pageNumber: pageNumber || 1,
       text: text.trim(),
@@ -117,8 +138,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Failed to save highlight." }, { status: 500 });
     }
 
-    // Log tracking event
-    await recordStudyEvent(userId, {
+    await recordStudyEvent(userId!, {
       bookId,
       eventType: "highlight_created",
       pageNumber: pageNumber || 1,
@@ -126,72 +146,53 @@ export async function POST(req: NextRequest) {
     }).catch(() => {});
 
     return NextResponse.json({ success: true, id: highlight.id, type: "highlight", highlight });
-  } catch (error: any) {
-    console.error("Annotations POST error:", error?.message || error);
-    return NextResponse.json({ error: "Failed to save annotation." }, { status: 500 });
   }
-}
+);
 
-export async function PATCH(req: NextRequest) {
-  try {
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
+export const PATCH = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.STANDARD,
+    bodySchema: patchAnnotationSchema,
+  },
+  async ({ userId, body }) => {
+    const data = body as z.infer<typeof patchAnnotationSchema>;
 
-    if (!userId) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    }
-
-    const body = await req.json();
-    const { id, type, color, note, title } = body;
-
-    if (!id) {
-      return NextResponse.json({ error: "Annotation ID is required." }, { status: 400 });
-    }
-
-    if (type === "bookmark") {
-      if (!title) {
+    if (data.type === "bookmark") {
+      if (!data.title) {
         return NextResponse.json({ error: "Title is required to update bookmark." }, { status: 400 });
       }
-      const updated = await updateBookmark(userId, id, title);
+      const updated = await updateBookmark(userId!, data.id, data.title);
       if (!updated) {
         return NextResponse.json({ error: "Failed to update bookmark or bookmark not found." }, { status: 404 });
       }
       return NextResponse.json({ success: true, bookmark: updated });
     } else {
-      const updated = await updateHighlight(userId, id, { color, note });
+      const updated = await updateHighlight(userId!, data.id, { color: data.color, note: data.note });
       if (!updated) {
         return NextResponse.json({ error: "Failed to update highlight or highlight not found." }, { status: 404 });
       }
       return NextResponse.json({ success: true, highlight: updated });
     }
-  } catch (error: any) {
-    console.error("Annotations PATCH error:", error?.message || error);
-    return NextResponse.json({ error: "Failed to update annotation." }, { status: 500 });
   }
-}
+);
 
-export async function DELETE(req: NextRequest) {
-  try {
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
-
-    if (!userId) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    }
-
-    const { searchParams } = new URL(req.url);
-    const id = searchParams.get("id");
-    const type = searchParams.get("type");
-    const bookId = searchParams.get("bookId");
-    const pageNumber = searchParams.get("pageNumber");
+export const DELETE = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.STANDARD,
+    querySchema: deleteAnnotationSchema,
+  },
+  async ({ userId, query }) => {
+    const { id, type, bookId, pageNumber } = query as z.infer<typeof deleteAnnotationSchema>;
 
     if (type === "bookmark" && bookId && pageNumber) {
-      const isOwner = await verifyBookOwnership(userId, bookId);
+      const isOwner = await verifyBookOwnership(userId!, bookId);
       if (!isOwner) {
         return NextResponse.json({ error: "Access denied." }, { status: 403 });
       }
-
-      const success = await deleteBookmark(userId, undefined, bookId, parseInt(pageNumber, 10));
+      const pNum = typeof pageNumber === "string" ? parseInt(pageNumber, 10) : pageNumber;
+      const success = await deleteBookmark(userId!, undefined, bookId, pNum);
       return NextResponse.json({ success });
     }
 
@@ -200,20 +201,17 @@ export async function DELETE(req: NextRequest) {
     }
 
     if (type === "bookmark") {
-      const success = await deleteBookmark(userId, id);
+      const success = await deleteBookmark(userId!, id);
       if (!success) {
         return NextResponse.json({ error: "Failed to delete bookmark or bookmark not found." }, { status: 404 });
       }
     } else {
-      const success = await deleteHighlight(userId, id);
+      const success = await deleteHighlight(userId!, id);
       if (!success) {
         return NextResponse.json({ error: "Failed to delete highlight or highlight not found." }, { status: 404 });
       }
     }
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    console.error("Annotations DELETE error:", error?.message || error);
-    return NextResponse.json({ error: "Failed to delete annotation." }, { status: 500 });
   }
-}
+);

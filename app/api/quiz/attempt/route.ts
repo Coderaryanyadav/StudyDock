@@ -1,21 +1,35 @@
-import { NextRequest, NextResponse } from "next/server";
-import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
+import { NextResponse } from "next/server";
+import { verifyBookOwnership } from "@/lib/supabase/auth";
 import { submitQuizAttempt } from "@/lib/quizzes/service";
 import { recordStudyEvent } from "@/lib/progress/service";
+import { withApiHandler, RATE_LIMITS } from "@/lib/api/with-handler";
+import { z } from "zod";
 
-export async function POST(req: NextRequest) {
-  try {
-    const auth = await authenticateRequest(req);
-    const userId = auth?.id;
+export const runtime = "nodejs";
 
-    if (!userId) {
-      return NextResponse.json(
-        { error: "Authentication required to record quiz attempts." },
-        { status: 401 }
-      );
-    }
+const quizAttemptSchema = z.object({
+  quizId: z.string().string().min(1, "Invalid quiz ID format"),
+  bookId: z.string().string().min(1, "Invalid book ID format").optional(),
+  answers: z.array(z.object({
+    questionId: z.string(),
+    selectedOptionId: z.string(),
+  })).optional(),
+  startedAt: z.string().refine((val) => !isNaN(Date.parse(val)), { message: "Invalid date format" }),
+  completedAt: z.string().refine((val) => !isNaN(Date.parse(val)), { message: "Invalid date format" }),
+  timeSpentSeconds: z.number().min(0).max(36000), // Max 10 hours for a quiz
+  concept: z.string().max(255).optional(),
+  chapterTitle: z.string().max(255).optional(),
+  pageNumber: z.union([z.number(), z.string()]).refine((val) => !isNaN(Number(val)), { message: "Valid page number is required" }),
+});
 
-    const body = await req.json();
+export const POST = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.STANDARD,
+    bodySchema: quizAttemptSchema,
+  },
+  async ({ userId, body }) => {
+    const data = body as z.infer<typeof quizAttemptSchema>;
     const {
       quizId,
       bookId,
@@ -26,42 +40,26 @@ export async function POST(req: NextRequest) {
       concept,
       chapterTitle,
       pageNumber,
-    } = body;
-
-    if (!quizId) {
-      return NextResponse.json({ error: "Quiz ID is required." }, { status: 400 });
-    }
+    } = data;
 
     if (bookId) {
-      const isOwner = await verifyBookOwnership(userId, bookId);
+      const isOwner = await verifyBookOwnership(userId!, bookId);
       if (!isOwner) {
         return NextResponse.json({ error: "Access denied. You do not own this textbook." }, { status: 403 });
       }
     }
 
-    if (!startedAt || !completedAt) {
-      return NextResponse.json({ error: "Start and end timestamps are required." }, { status: 400 });
-    }
-
     const start = new Date(startedAt).getTime();
     const end = new Date(completedAt).getTime();
 
-    if (isNaN(start) || isNaN(end) || end < start) {
+    if (end < start) {
       return NextResponse.json({ error: "Invalid timestamps provided." }, { status: 400 });
     }
 
-    if (typeof timeSpentSeconds !== "number" || timeSpentSeconds < 0) {
-      return NextResponse.json({ error: "Invalid time spent." }, { status: 400 });
-    }
-
-    if (pageNumber === undefined || pageNumber === null || isNaN(Number(pageNumber))) {
-      return NextResponse.json({ error: "Valid page number is required." }, { status: 400 });
-    }
-
-    const result = await submitQuizAttempt(userId, {
+    const result = await submitQuizAttempt(userId!, {
       quizId,
       bookId,
-      answers: Array.isArray(answers) ? answers : [],
+      answers: answers || [],
       startedAt,
       completedAt,
       timeSpentSeconds,
@@ -77,8 +75,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Log tracking event
-    await recordStudyEvent(userId, {
+    await recordStudyEvent(userId!, {
       bookId,
       eventType: "quiz_completed",
       pageNumber: Number(pageNumber),
@@ -97,12 +94,5 @@ export async function POST(req: NextRequest) {
       totalQuestions: result.totalQuestions,
       conceptMastery: result.conceptMastery,
     });
-  } catch (error: any) {
-    console.error("Quiz attempt API error:", error?.message || error);
-    return NextResponse.json(
-      { error: "Failed to record quiz attempt." },
-      { status: 500 }
-    );
   }
-}
-
+);

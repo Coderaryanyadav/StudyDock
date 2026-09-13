@@ -1,4 +1,5 @@
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { Logger, LogState } from "@/lib/logger";
 import { QuizQuestion, QuizAttempt, QuizAttemptAnswer } from "@/types";
 
 export interface SavedQuiz {
@@ -105,7 +106,7 @@ export async function saveQuizWithQuestions(
     .single();
 
   if (quizErr || !quiz) {
-    console.error("Failed to insert quiz:", quizErr);
+    Logger.error("Failed to insert quiz", { state: LogState.DB_FAILED, error: quizErr });
     return null;
   }
 
@@ -124,7 +125,7 @@ export async function saveQuizWithQuestions(
 
   const { error: questErr } = await supabase.from("quiz_questions").insert(questionRecords);
   if (questErr) {
-    console.error("Failed to insert quiz questions:", questErr);
+    Logger.error("Failed to insert quiz questions", { state: LogState.DB_FAILED, error: questErr });
     // Rollback quiz parent record if question insertion fails
     await supabase.from("quizzes").delete().eq("id", quiz.id);
     return null;
@@ -248,7 +249,7 @@ export async function submitQuizAttempt(
     .single();
 
   if (attemptErr || !attempt) {
-    console.error("Failed to insert quiz attempt:", attemptErr);
+    Logger.error("Failed to insert quiz attempt", { state: LogState.DB_FAILED, error: attemptErr });
     return null;
   }
 

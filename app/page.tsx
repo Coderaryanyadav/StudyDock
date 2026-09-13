@@ -460,7 +460,7 @@ export default function Home() {
   // 2. Unauthenticated State (STATE A) — Dedicated Professional Welcome / Login Screen
   if (authState === "unauthenticated") {
     return (
-      <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100 antialiased overflow-hidden font-sans">
+      <div className="h-screen flex flex-col bg-slate-950 text-slate-100 antialiased overflow-hidden font-sans">
         <WorkspaceNavbar
           currentView="landing"
           onViewChange={() => {}}
@@ -499,7 +499,7 @@ export default function Home() {
 
   // 3. Authenticated State (STATE B) — Normal Existing StudyDock Application
   return (
-    <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100 antialiased overflow-hidden font-sans">
+    <div className="h-screen flex flex-col bg-slate-950 text-slate-100 antialiased overflow-hidden font-sans">
       {/* Top Navigation */}
       <WorkspaceNavbar
         currentView={currentView}

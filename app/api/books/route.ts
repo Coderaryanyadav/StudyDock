@@ -16,25 +16,11 @@ export const GET = withApiHandler(
       );
     }
 
-    let { data: books, error } = await supabase
+    const { data: books, error } = await supabase
       .from("books")
       .select("id, title, author, edition, subject, total_pages, status, status_message, last_page_read, youtube_url, video_title, created_at, updated_at")
       .eq("user_id", userId)
       .order("updated_at", { ascending: false });
-
-    if (error && (error.code === "PGRST301" || error.message?.includes("JWT"))) {
-      const { createAdminClient } = await import("@/lib/supabase/admin");
-      const adminClient = createAdminClient();
-      if (adminClient) {
-        const res = await adminClient
-          .from("books")
-          .select("id, title, author, edition, subject, total_pages, status, status_message, last_page_read, youtube_url, video_title, created_at, updated_at")
-          .eq("user_id", userId)
-          .order("updated_at", { ascending: false });
-        books = res.data;
-        error = res.error;
-      }
-    }
 
     if (error) {
       console.error("Fetch books error:", error);

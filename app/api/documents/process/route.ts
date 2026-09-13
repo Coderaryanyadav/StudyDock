@@ -80,5 +80,4 @@ export const POST = withApiHandler(
         },
       });
     }
-  )(req as any);
-};
+);

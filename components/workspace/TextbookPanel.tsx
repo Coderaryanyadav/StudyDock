@@ -104,15 +104,24 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
   // 1. Load persistent annotations, bookmarks & notes from database
   useEffect(() => {
     if (!book?.id) return;
+    let isMounted = true;
     fetch(`/api/annotations?bookId=${encodeURIComponent(book.id)}`)
       .then((res) => res.json())
       .then((data) => {
+        if (!isMounted) return;
         if (data.success) {
           if (Array.isArray(data.highlights)) {
-            setHighlights(data.highlights);
+            setHighlights((prev) => {
+              const serverIds = new Set(data.highlights.map((h: any) => h.id));
+              const localOnly = prev.filter((h) => !serverIds.has(h.id));
+              return [...data.highlights, ...localOnly];
+            });
           }
           if (Array.isArray(data.bookmarks)) {
-            setBookmarks(data.bookmarks.map((b: any) => b.pageNumber));
+            const serverPages: number[] = data.bookmarks.map((b: any) => b.pageNumber);
+            setBookmarks((prev) => {
+              return Array.from(new Set([...serverPages, ...prev])).sort((a, b) => a - b);
+            });
           }
         }
       })
@@ -121,11 +130,20 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
     fetch(`/api/notes?bookId=${encodeURIComponent(book.id)}`)
       .then((res) => res.json())
       .then((data) => {
+        if (!isMounted) return;
         if (data.success && Array.isArray(data.notes)) {
-          setNotes(data.notes);
+          setNotes((prev) => {
+            const serverIds = new Set(data.notes.map((n: any) => n.id));
+            const localOnly = prev.filter((n) => !serverIds.has(n.id));
+            return [...data.notes, ...localOnly];
+          });
         }
       })
       .catch((err) => console.warn("Failed to load notes:", err));
+
+    return () => {
+      isMounted = false;
+    };
   }, [book?.id]);
 
   // Reset scroll position to top when page changes
@@ -146,15 +164,18 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
   const isCurrentPageBookmarked = bookmarks.includes(activePageNumber);
 
   const toggleBookmark = async () => {
-    const isBookmarked = isCurrentPageBookmarked;
-    const newBookmarks = isBookmarked
-      ? bookmarks.filter((p) => p !== activePageNumber)
-      : [...bookmarks, activePageNumber].sort((a, b) => a - b);
-
-    setBookmarks(newBookmarks);
+    let wasBookmarked = bookmarks.includes(activePageNumber);
+    setBookmarks((prev) => {
+      wasBookmarked = prev.includes(activePageNumber);
+      if (wasBookmarked) {
+        return prev.filter((p) => p !== activePageNumber);
+      } else {
+        return [...prev, activePageNumber].sort((a, b) => a - b);
+      }
+    });
 
     if (book?.id) {
-      if (isBookmarked) {
+      if (wasBookmarked) {
         await fetch(`/api/annotations?bookId=${encodeURIComponent(book.id)}&type=bookmark&pageNumber=${activePageNumber}`, {
           method: "DELETE",
         }).catch(() => {});

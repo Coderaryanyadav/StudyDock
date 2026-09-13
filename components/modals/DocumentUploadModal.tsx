@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { X, Upload, FileText, CheckCircle2, AlertCircle, Loader2, Database, Cpu, BookOpen } from "lucide-react";
 import { Book } from "@/types";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 interface DocumentUploadModalProps {
   isOpen: boolean;
@@ -62,8 +63,18 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
       formData.append("author", author || "Unknown Author");
       formData.append("subject", subject || "General");
 
+      const supabase = getSupabaseBrowserClient();
+      const headers: Record<string, string> = {};
+      if (supabase) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session?.access_token) {
+          headers["Authorization"] = `Bearer ${sessionData.session.access_token}`;
+        }
+      }
+
       const res = await fetch("/api/documents/process", {
         method: "POST",
+        headers,
         body: formData,
       });
 

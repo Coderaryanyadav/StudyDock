@@ -491,8 +491,17 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
     ]);
 
     // 8. Ingest Chapters and Sections into database
-    const finalChapters: Chapter[] = [];
+    const seenChapterNumbers = new Set<number>();
+    const uniqueChapters: DetectedChapter[] = [];
     for (const ch of detectedChapters) {
+      if (!seenChapterNumbers.has(ch.number)) {
+        seenChapterNumbers.add(ch.number);
+        uniqueChapters.push(ch);
+      }
+    }
+
+    const finalChapters: Chapter[] = [];
+    for (const ch of uniqueChapters) {
       const { data: chRecord, error: chErr } = await supabase
         .from("chapters")
         .insert({

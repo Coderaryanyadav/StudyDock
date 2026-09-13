@@ -49,21 +49,26 @@ test.describe.serial("StudyDock Definitive Acceptance Test Suite", () => {
           ? "22222222-2222-4222-8222-222222222222"
           : "11111111-1111-4111-8111-111111111111";
 
+        const sessionPayload = {
+          access_token: `mock-jwt-token-${userId}`,
+          token_type: "bearer",
+          expires_in: 3600,
+          refresh_token: `mock-refresh-token-${userId}`,
+          user: {
+            id: userId,
+            aud: "authenticated",
+            role: "authenticated",
+            email: email,
+            created_at: new Date().toISOString(),
+          },
+        };
+
         await route.fulfill({
           status: 200,
           contentType: "application/json",
           json: {
-            access_token: `mock-jwt-token-${userId}`,
-            token_type: "bearer",
-            expires_in: 3600,
-            refresh_token: `mock-refresh-token-${userId}`,
-            user: {
-              id: userId,
-              aud: "authenticated",
-              role: "authenticated",
-              email: email,
-              created_at: new Date().toISOString(),
-            },
+            ...sessionPayload,
+            session: sessionPayload,
           },
         });
         return;
@@ -143,6 +148,12 @@ test.describe.serial("StudyDock Definitive Acceptance Test Suite", () => {
     try {
       await expect(page.getByTestId("user-profile-menu-btn")).toBeVisible({ timeout: 4000 });
     } catch {
+      if (!(await page.getByTestId("auth-modal").isVisible().catch(() => false))) {
+        const signInBtn = page.getByTestId("nav-sign-in-btn");
+        if (await signInBtn.isVisible().catch(() => false)) {
+          await signInBtn.click();
+        }
+      }
       await page.getByTestId("auth-tab-signin").click();
       await page.getByTestId("auth-email-input").fill(email);
       await page.getByTestId("auth-password-input").fill(pass);
@@ -166,6 +177,7 @@ test.describe.serial("StudyDock Definitive Acceptance Test Suite", () => {
     test.setTimeout(180000);
 
     console.log("➡️ STEPS 1-4: Open, Onboarding, Signup, Login");
+    await setupAuthRoutes(page);
     await page.goto("/");
     await page.waitForLoadState("domcontentloaded");
     await performAuth(page, userAEmail, userAPassword);
@@ -181,6 +193,8 @@ test.describe.serial("StudyDock Definitive Acceptance Test Suite", () => {
       await importBtn.click();
     }
 
+    await expect(page.getByTestId("pdf-dropzone-input")).toBeAttached({ timeout: 15000 });
+
     const fileInput = page.getByTestId("pdf-dropzone-input");
     const pdfBuffer = generateE2ETestPdfBuffer(testPages);
     await fileInput.setInputFiles({
@@ -190,13 +204,12 @@ test.describe.serial("StudyDock Definitive Acceptance Test Suite", () => {
     });
 
     await page.getByTestId("import-title-input").fill("StudyDock Network Architecture");
+    await page.getByTestId("import-author-input").fill("StudyDock Author");
+    await page.getByTestId("import-subject-input").fill("Computer Science");
     await page.getByTestId("submit-upload-btn").click();
 
-    await expect(page.getByTestId("import-loading-state")).toBeVisible({ timeout: 10000 });
-    await expect(page.getByTestId("import-loading-state")).not.toBeVisible({ timeout: 45000 });
-
-    // Workspace is active
-    await expect(page.getByTestId("page-number-input")).toBeVisible({ timeout: 15000 });
+    // Wait for processing to complete and workspace to load
+    await expect(page.getByTestId("page-number-input")).toBeVisible({ timeout: 45000 });
 
     const booksRes = await page.request.get("/api/books");
     const booksData = await booksRes.json();

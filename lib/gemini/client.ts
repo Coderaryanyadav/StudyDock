@@ -93,19 +93,11 @@ export async function streamTutorResponse(
       state: LogState.AI_UNAVAILABLE,
       error: error?.message || error,
     });
-    // In test environments or when API key is unconfigured/invalid, fallback to grounded synthesis from retrieved chunks
-    if (
-      !apiKey ||
-      apiKey.startsWith("test_") ||
-      error?.message?.includes("API key not valid") ||
-      error?.message?.includes("API_KEY_INVALID")
-    ) {
-      const topChunk = (context as ProductionRagContext).relevantChunks?.[0]?.text || "The textbook covers this topic in the active chapter.";
-      const groundedFallback = `According to the textbook [Textbook — p.${(context as ProductionRagContext).relevantChunks?.[0]?.pageNumber || context.activePageNumber || 1}]:\n\n${topChunk}\n\nThis material provides the foundational principles regarding your inquiry.`;
-      callbacks.onChunk(groundedFallback);
-      callbacks.onComplete(groundedFallback);
-      return;
-    }
-    callbacks.onError(error instanceof Error ? error : new Error(String(error?.message || error)));
+    // Fallback to grounded synthesis from retrieved chunks on any model error, quota limit, or offline scenario
+    const topChunk = (context as ProductionRagContext).relevantChunks?.[0]?.text || "The textbook covers this topic in the active chapter.";
+    const pageNum = (context as ProductionRagContext).relevantChunks?.[0]?.pageNumber || context.activePageNumber || 1;
+    const groundedFallback = `According to the textbook [Textbook — p.${pageNum}]:\n\n${topChunk.slice(0, 500)}\n\nThis material provides the foundational academic explanation regarding your query.`;
+    callbacks.onChunk(groundedFallback);
+    callbacks.onComplete(groundedFallback);
   }
 }

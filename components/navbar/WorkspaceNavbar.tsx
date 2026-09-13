@@ -58,7 +58,7 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
     if (supabase) {
-      supabase.auth.getSession().then(({ data }) => {
+      supabase.auth.getSession().then(({ data }: any) => {
         if (data.session?.user?.email) {
           setUserEmail(data.session.user.email);
         } else {
@@ -66,7 +66,7 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
         }
       });
 
-      const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
+      const { data: authListener } = supabase.auth.onAuthStateChange((_: any, session: any) => {
         setUserEmail(session?.user?.email || null);
       });
 

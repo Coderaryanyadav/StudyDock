@@ -43,7 +43,10 @@ export function withApiHandler<TBody = any, TQuery = any>(
           Logger.warn(`[AUTH] Unauthorized access attempt`, {
             correlationId,
             state: LogState.AUTH_FAILED,
-            ip
+            ip,
+            url: req.url,
+            method: req.method,
+            hasAuthHeader: !!req.headers.get("authorization"),
           });
           return NextResponse.json({ error: "Authentication required." }, { status: 401 });
         }

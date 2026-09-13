@@ -95,12 +95,16 @@ export async function attachVideoToBook(
     .maybeSingle();
 
   if (existingVideo) {
-    Logger.warn(`Video ${youtubeId} already attached to book ${bookId}`, {
+    Logger.warn(`Video ${youtubeId} already attached to book ${bookId}. Returning existing.`, {
       state: LogState.INFO,
       youtubeId,
       bookId
     });
-    return null;
+    const videos = await getVideosForBook(userId, bookId);
+    const existing = videos.find((v) => v.youtubeId === youtubeId) || videos[0];
+    if (existing) {
+      return existing;
+    }
   }
 
   const resolvedTitle = customTitle?.trim() || metadata.title;

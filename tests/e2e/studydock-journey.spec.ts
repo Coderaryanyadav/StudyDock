@@ -51,21 +51,26 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
           ? "22222222-2222-4222-8222-222222222222"
           : "11111111-1111-4111-8111-111111111111";
 
+        const sessionPayload = {
+          access_token: `mock-jwt-token-${userId}`,
+          token_type: "bearer",
+          expires_in: 3600,
+          refresh_token: `mock-refresh-token-${userId}`,
+          user: {
+            id: userId,
+            aud: "authenticated",
+            role: "authenticated",
+            email: email,
+            created_at: new Date().toISOString(),
+          },
+        };
+
         await route.fulfill({
           status: 200,
           contentType: "application/json",
           json: {
-            access_token: `mock-jwt-token-${userId}`,
-            token_type: "bearer",
-            expires_in: 3600,
-            refresh_token: `mock-refresh-token-${userId}`,
-            user: {
-              id: userId,
-              aud: "authenticated",
-              role: "authenticated",
-              email: email,
-              created_at: new Date().toISOString(),
-            },
+            ...sessionPayload,
+            session: sessionPayload,
           },
         });
         return;

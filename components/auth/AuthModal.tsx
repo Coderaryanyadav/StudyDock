@@ -75,12 +75,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           password,
         });
         if (signUpErr) throw signUpErr;
-        if (data.session || data.user) {
+        if (data.session) {
           setSuccessMsg("Welcome to StudyDock!");
           if (onAuthSuccess) onAuthSuccess(data.user?.email || email);
           setTimeout(onClose, 300);
         } else {
-          setSuccessMsg("Account created! You can now sign in.");
+          const { data: signInData, error: autoSignInErr } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+          });
+          if (!autoSignInErr && signInData?.session) {
+            setSuccessMsg("Welcome to StudyDock!");
+            if (onAuthSuccess) onAuthSuccess(signInData.user?.email || email);
+            setTimeout(onClose, 300);
+          } else {
+            setSuccessMsg("Account created! Please sign in.");
+            setMode("signin");
+          }
         }
       } else {
         const { data, error: signInErr } = await supabase.auth.signInWithPassword({

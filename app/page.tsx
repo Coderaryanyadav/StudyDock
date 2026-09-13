@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Book, StudentProgress, VideoLecture } from "@/types";
 import { BookOpen, Upload, Loader2, GraduationCap } from "lucide-react";
 import { WorkspaceNavbar } from "@/components/navbar/WorkspaceNavbar";
@@ -98,6 +98,8 @@ export default function Home() {
     }
   };
 
+  const sessionUserLoadedRef = useRef<string | null>(null);
+
   // Real Supabase Session Lifecycle Listener
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
@@ -106,30 +108,36 @@ export default function Home() {
       return;
     }
 
-    supabase.auth.getSession().then(({ data, error }) => {
-      if (!error && data?.session?.user) {
+    const initAuth = (sessionUser: any) => {
+      if (sessionUser?.id) {
         setAuthState("authenticated");
-        fetchUserBooksAndLoadLatest();
-        fetchUserProgress();
+        if (sessionUserLoadedRef.current !== sessionUser.id) {
+          sessionUserLoadedRef.current = sessionUser.id;
+          fetchUserBooksAndLoadLatest();
+          fetchUserProgress();
+        }
       } else {
-        setAuthState("unauthenticated");
-      }
-    }).catch(() => {
-      setAuthState("unauthenticated");
-    });
-
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session?.user) {
-        setAuthState("authenticated");
-        fetchUserBooksAndLoadLatest();
-        fetchUserProgress();
-      } else {
+        sessionUserLoadedRef.current = null;
         setAuthState("unauthenticated");
         setActiveBook(null);
         setActiveVideo(null);
         setQuizQuestions([]);
         setFlashcards([]);
       }
+    };
+
+    supabase.auth.getSession().then(({ data, error }: any) => {
+      if (!error && data?.session?.user) {
+        initAuth(data.session.user);
+      } else {
+        initAuth(null);
+      }
+    }).catch(() => {
+      initAuth(null);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event: any, session: any) => {
+      initAuth(session?.user || null);
     });
 
     return () => {

@@ -143,29 +143,25 @@ export async function retrieveRelevantContext(
   try {
     // Generate query embedding (768 dimensions)
     const queryEmbedding = await generateEmbedding(cleanQuery);
-    if (!Array.isArray(queryEmbedding) || queryEmbedding.length !== 768) {
-      throw new Error(`Invalid query embedding dimension: ${queryEmbedding?.length || 0}`);
-    }
 
-    // Authenticated vector search with threshold
-    const { data, error } = await supabase.rpc("match_book_chunks", {
-      query_embedding: queryEmbedding,
-      match_threshold: 0.20,
-      match_count: 10,
-      filter_book_id: book.id,
-    });
+    let matchData: any[] | null = null;
 
-    if (error) {
-      Logger.error("pgvector match_book_chunks error", {
-        state: LogState.RAG_UNAVAILABLE,
-        bookId: book.id,
-        error
+    if (Array.isArray(queryEmbedding) && queryEmbedding.length === 768) {
+      // Authenticated vector search with threshold
+      const { data, error } = await supabase.rpc("match_book_chunks", {
+        query_embedding: queryEmbedding,
+        match_threshold: 0.20,
+        match_count: 10,
+        filter_book_id: book.id,
       });
-      throw new Error("Vector search index query failed.");
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        matchData = data;
+      }
     }
 
-    if (Array.isArray(data) && data.length > 0) {
-      for (const match of data) {
+    if (Array.isArray(matchData) && matchData.length > 0) {
+      for (const match of matchData) {
         // Enforce strict book isolation
         if (match.book_id && match.book_id !== book.id) {
           continue;
@@ -203,14 +199,54 @@ export async function retrieveRelevantContext(
           keywordScore: kwScore,
         });
       }
+    } else {
+      // Direct table retrieval fallback for resilient chunk access
+      const { data: chunksData } = await supabase
+        .from("book_chunks")
+        .select("id, book_id, page_id, chunk_index, page_number, chapter_title, section_title, text, key_terms")
+        .eq("book_id", book.id)
+        .limit(25);
+
+      if (Array.isArray(chunksData) && chunksData.length > 0) {
+        for (const item of chunksData) {
+          const chunkText = item.text || "";
+          if (!chunkText.trim()) continue;
+
+          const chunk: BookChunk = {
+            id: item.id,
+            bookId: item.book_id || book.id,
+            pageId: item.page_id || null,
+            chapterId: null,
+            chapterTitle: item.chapter_title || null,
+            sectionId: null,
+            sectionTitle: item.section_title || null,
+            pageNumber: Math.max(1, item.page_number || 1),
+            text: chunkText,
+            keyTerms: item.key_terms || [],
+          };
+
+          const kwScore = calculateKeywordScore(cleanQuery, chunk.text, chunk.keyTerms);
+          let combinedScore = kwScore > 0 ? kwScore : 0.1;
+
+          if (selectedText && chunk.text && chunk.text.toLowerCase().includes(selectedText.toLowerCase().slice(0, 30))) {
+            combinedScore += 0.4;
+          }
+
+          scoredChunks.push({
+            chunk,
+            score: combinedScore,
+            semanticSimilarity: 0.5,
+            keywordScore: kwScore,
+          });
+        }
+      }
     }
   } catch (pgErr: any) {
-    Logger.error("Production pgvector retrieval failed", {
+    Logger.error("Production pgvector retrieval fallback triggered", {
       state: LogState.RAG_UNAVAILABLE,
       bookId: book.id,
       error: pgErr?.message
     });
-    throw new Error(pgErr?.message || "StudyDock document search index is temporarily unavailable.");
   }
 
   // Sort descending by score

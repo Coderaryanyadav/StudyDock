@@ -308,18 +308,22 @@ export async function saveMessage(
 
   // Insert message citations matching database schema
   if (citations && citations.length > 0) {
-    const citationRecords = citations.map((c) => ({
-      message_id: msg.id,
-      chunk_id: c.id && c.id.startsWith("cite-tb-") ? c.id.replace("cite-tb-", "") : null,
-      source_type: c.sourceType || "textbook",
-      book_title: c.bookTitle || "Textbook",
-      chapter_title: c.chapter || null,
-      section_title: c.section || null,
-      page_number: c.pageNumber || 1,
-      video_timestamp_seconds: c.videoTimestampSeconds ?? null,
-      video_formatted_time: c.videoFormattedTime ?? null,
-      excerpt: c.excerpt || "",
-    }));
+    const isUuid = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+    const citationRecords = citations.map((c) => {
+      const rawChunkId = c.id && c.id.startsWith("cite-tb-") ? c.id.replace("cite-tb-", "") : c.id;
+      return {
+        message_id: msg.id,
+        chunk_id: rawChunkId && isUuid(rawChunkId) ? rawChunkId : null,
+        source_type: c.sourceType || "textbook",
+        book_title: c.bookTitle || "Textbook",
+        chapter_title: c.chapter || null,
+        section_title: c.section || null,
+        page_number: c.pageNumber || 1,
+        video_timestamp_seconds: c.videoTimestampSeconds ?? null,
+        video_formatted_time: c.videoFormattedTime ?? null,
+        excerpt: c.excerpt || "",
+      };
+    });
 
     const { error: citeErr } = await supabase.from("message_citations").insert(citationRecords);
     if (citeErr) {

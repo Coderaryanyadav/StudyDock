@@ -118,9 +118,9 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
             });
           }
           if (Array.isArray(data.bookmarks)) {
-            const serverPages: number[] = data.bookmarks.map((b: any) => b.pageNumber);
+            const serverPages: number[] = data.bookmarks.map((b: any) => Number(b.pageNumber));
             setBookmarks((prev) => {
-              return Array.from(new Set([...serverPages, ...prev])).sort((a, b) => a - b);
+              return Array.from(new Set([...serverPages, ...prev.map(Number)])).sort((a, b) => a - b);
             });
           }
         }
@@ -161,22 +161,24 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
     }
   }, [targetCitationPage, activePageNumber, onPageChange, onClearTargetCitation]);
 
-  const isCurrentPageBookmarked = bookmarks.includes(activePageNumber);
+  const currentPageNum = Number(activePageNumber) || 1;
+  const isCurrentPageBookmarked = bookmarks.includes(currentPageNum);
 
   const toggleBookmark = async () => {
-    let wasBookmarked = bookmarks.includes(activePageNumber);
+    const pageNum = Number(activePageNumber) || 1;
+    let wasBookmarked = bookmarks.includes(pageNum);
     setBookmarks((prev) => {
-      wasBookmarked = prev.includes(activePageNumber);
+      wasBookmarked = prev.includes(pageNum);
       if (wasBookmarked) {
-        return prev.filter((p) => p !== activePageNumber);
+        return prev.filter((p) => p !== pageNum);
       } else {
-        return [...prev, activePageNumber].sort((a, b) => a - b);
+        return [...prev, pageNum].sort((a, b) => a - b);
       }
     });
 
     if (book?.id) {
       if (wasBookmarked) {
-        await fetch(`/api/annotations?bookId=${encodeURIComponent(book.id)}&type=bookmark&pageNumber=${activePageNumber}`, {
+        await fetch(`/api/annotations?bookId=${encodeURIComponent(book.id)}&type=bookmark&pageNumber=${pageNum}`, {
           method: "DELETE",
         }).catch(() => {});
       } else {
@@ -186,8 +188,8 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
           body: JSON.stringify({
             bookId: book.id,
             type: "bookmark",
-            pageNumber: activePageNumber,
-            title: `Bookmark on Page ${activePageNumber}`,
+            pageNumber: pageNum,
+            title: `Bookmark on Page ${pageNum}`,
           }),
         }).catch(() => {});
       }

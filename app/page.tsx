@@ -499,7 +499,7 @@ export default function Home() {
 
   // 3. Authenticated State (STATE B) — Normal Existing StudyDock Application
   return (
-    <div className="h-screen flex flex-col bg-slate-950 text-slate-100 antialiased overflow-hidden font-sans">
+    <div className="h-[100dvh] flex flex-col bg-slate-950 text-slate-100 antialiased overflow-hidden font-sans">
       {/* Top Navigation */}
       <WorkspaceNavbar
         currentView={currentView}

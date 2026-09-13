@@ -75,7 +75,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+    <div data-testid="upload-modal-content" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
       <div className="w-full max-w-lg bg-[#0d131f] border border-slate-800 rounded-xl p-6 md:p-8 shadow-2xl space-y-5 text-slate-100">
         
         {/* Header */}
@@ -91,6 +91,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
           </div>
           <button
             onClick={onClose}
+            data-testid="close-upload-modal-btn"
             className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
           >
             <X className="w-5 h-5" />
@@ -103,7 +104,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
             <input
               type="file"
               accept=".pdf,application/pdf"
-              data-testid="pdf-dropzone-input"
+              data-testid="document-file-input"
               aria-label="Upload PDF document"
               onChange={handleFileChange}
               className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
@@ -193,7 +194,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
             <button
               type="submit"
               disabled={isUploading || !file}
-              data-testid="import-submit-btn"
+              data-testid="submit-upload-btn"
               aria-label="Import and Index Textbook PDF"
               className="px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold shadow-sm flex items-center gap-2 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
             >

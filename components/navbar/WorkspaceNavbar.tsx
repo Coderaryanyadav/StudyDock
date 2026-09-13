@@ -102,7 +102,7 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
         {/* Workspace Active Textbook Breadcrumb */}
         {currentView === "workspace" && activeBook && (
           <div className="hidden lg:flex items-center gap-2 pl-4 border-l border-slate-800 text-xs text-slate-400">
-            <span className="text-slate-300 font-medium truncate max-w-[160px]">
+            <span data-testid="nav-active-book-title" className="text-slate-300 font-medium truncate max-w-[160px]">
               {activeBook.title}
             </span>
             <ChevronRight className="w-3.5 h-3.5 text-slate-600 shrink-0" />
@@ -197,7 +197,7 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
         <button
           onClick={onOpenUploadModal}
           aria-label="Import Textbook PDF"
-          data-testid="nav-import-btn"
+          data-testid="nav-upload-btn"
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
         >
           <Upload className="w-3.5 h-3.5" />
@@ -246,7 +246,7 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
                 aria-expanded={showUserMenu}
                 className="flex items-center gap-2 p-1.5 rounded-md hover:bg-slate-800 border border-slate-800 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
               >
-                <div className="w-6 h-6 rounded bg-indigo-600/30 text-indigo-300 font-bold text-xs flex items-center justify-center border border-indigo-500/30">
+                <div data-testid="nav-user-email" className="w-6 h-6 rounded bg-indigo-600/30 text-indigo-300 font-bold text-xs flex items-center justify-center border border-indigo-500/30">
                   {userEmail[0].toUpperCase()}
                 </div>
               </button>

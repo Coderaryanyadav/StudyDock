@@ -1,3 +1,4 @@
+import * as crypto from "crypto";
 import { Book, BookChunk, BookPage, Chapter, Section } from "@/types";
 import { generateBatchEmbeddings } from "@/lib/rag/embeddings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -11,6 +12,7 @@ export interface ProcessDocumentOptions {
   title: string;
   author?: string;
   subject?: string;
+  bookId?: string; // Optional existing book ID for retry operations
 }
 
 export type DocumentProcessingStatus =
@@ -32,8 +34,11 @@ export interface ProcessedDocumentResult {
   isScannedPdf?: boolean;
 }
 
+export const MAX_PDF_SIZE_BYTES = 50 * 1024 * 1024; // 50MB maximum
+
 /**
  * Validates PDF file signature, MIME type, extension, and file size constraints.
+ * Enforces magic bytes verification: must start with %PDF-
  */
 export function validatePdfFile(
   fileBuffer: Buffer,
@@ -44,22 +49,22 @@ export function validatePdfFile(
     return { isValid: false, error: "Zero-byte or empty file." };
   }
 
-  const MAX_SIZE = 50 * 1024 * 1024; // 50MB
-  if (fileBuffer.length > MAX_SIZE) {
+  if (fileBuffer.length > MAX_PDF_SIZE_BYTES) {
     return { isValid: false, error: "File exceeds maximum permitted size of 50MB." };
   }
 
-  const cleanName = fileName.toLowerCase().trim();
+  const cleanName = (fileName || "").toLowerCase().trim();
   if (!cleanName.endsWith(".pdf")) {
     return { isValid: false, error: "File does not have a valid .pdf extension." };
   }
 
-  const cleanMime = (mimeType || "").toLowerCase();
+  const cleanMime = (mimeType || "").toLowerCase().trim();
   const isPdfMime = cleanMime === "application/pdf" || cleanMime === "application/x-pdf" || cleanMime === "";
   if (!isPdfMime) {
     return { isValid: false, error: `Invalid MIME type (${mimeType}). Only PDF documents are supported.` };
   }
 
+  // Verify actual PDF magic bytes (%PDF-)
   const header = fileBuffer.slice(0, 5).toString("utf-8");
   if (!header.startsWith("%PDF")) {
     return { isValid: false, error: "Missing valid PDF header signature (%PDF-)." };
@@ -69,13 +74,14 @@ export function validatePdfFile(
 }
 
 /**
- * Extracts key domain terms from text without common stopwords.
+ * Extracts domain-specific key terms without stopwords.
  */
 function extractKeyTerms(text: string): string[] {
   const stopwords = new Set([
     "which", "their", "there", "about", "would", "these", "other",
     "where", "could", "should", "after", "before", "during", "while",
-    "under", "above", "between", "through", "because", "against"
+    "under", "above", "between", "through", "because", "against",
+    "having", "shouldn", "wasn", "weren", "won", "wouldn"
   ]);
 
   const words = text
@@ -141,12 +147,20 @@ interface DetectedChapter {
 }
 
 /**
- * Production-backed PDF Ingestion Pipeline:
- * UPLOAD -> VALIDATE -> CREATE BOOK -> STORE ORIGINAL PDF -> EXTRACT PDF ->
- * DETECT CHAPTERS -> DETECT SECTIONS -> INSERT PAGES -> INSERT CHUNKS ->
- * GENERATE GEMINI EMBEDDINGS -> STORE EMBEDDINGS IN PGVECTOR -> VERIFY PERSISTENCE -> READY
+ * Production-grade transactional PDF Ingestion Pipeline:
  * 
- * Strict fail-closed error handling: on any failure, marks status FAILED with diagnostic message.
+ * 1. AUTH & TENANT VALIDATION
+ * 2. MAGIC BYTE & FORMAT VALIDATION
+ * 3. IDEMPOTENCY / CONCURRENCY LOCK CHECK
+ * 4. CREATE / REUSE BOOK RECORD (UPLOADING)
+ * 5. PRIVATE STORAGE UPLOAD & HASH VERIFICATION
+ * 6. PAGE-BY-PAGE TEXT EXTRACTION (DETECT ENCRYPTED/CORRUPT/SCANNED)
+ * 7. RELATIONAL STRUCTURE INGESTION (CHAPTERS & SECTIONS)
+ * 8. PERSIST BOOK PAGES (WITH REAL FOREIGN KEYS)
+ * 9. GENERATE GEMINI VECTOR EMBEDDINGS
+ * 10. PERSIST CHUNKS TO PGVECTOR (WITH REAL FOREIGN KEYS)
+ * 11. STRICT VERIFICATION CHECK (STORAGE, PAGES, CHUNKS, EMBEDDINGS)
+ * 12. ATOMIC TRANSITION TO READY (OR OCR_REQUIRED / FAILED)
  */
 export async function processPdfDocument(options: ProcessDocumentOptions): Promise<ProcessedDocumentResult> {
   const {
@@ -158,13 +172,15 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
     title,
     author,
     subject,
+    bookId,
   } = options;
 
+  // 1. Strict Tenant Authentication Check
   if (!userId || userId === "guest-user") {
     throw new Error("Authentication required for document indexing.");
   }
 
-  // 1. VALIDATE PDF file signature and constraints
+  // 2. Strict Magic Byte & Format Validation
   const validation = validatePdfFile(fileBuffer, fileName, mimeType);
   if (!validation.isValid) {
     throw new Error(`PDF validation failed: ${validation.error}`);
@@ -175,41 +191,102 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
     throw new Error("Database service unavailable. Cannot initiate PDF ingestion.");
   }
 
-  const cleanTitle = title.trim() || fileName.replace(/\.[^/.]+$/, "");
-  const cleanAuthor = author?.trim() || "Unknown Author";
-  const cleanSubject = subject?.trim() || "General Studies";
+  // Compute SHA-256 hash for deduplication and integrity
+  const fileHash = crypto.createHash("sha256").update(fileBuffer).digest("hex");
+  const cleanTitle = title?.trim() || fileName.replace(/\.[^/.]+$/, "");
+  const cleanAuthor = author?.trim() || "Author Unavailable";
+  const cleanSubject = subject?.trim() || "Subject Unavailable";
 
-  let dbBookId: string | null = null;
+  let dbBookId: string | null = bookId || null;
 
   try {
-    // 2. CREATE BOOK record with initial status UPLOADING
-    const { data: initialBook, error: bookCreateErr } = await supabase
-      .from("books")
-      .insert({
-        user_id: userId,
-        title: cleanTitle,
-        author: cleanAuthor,
-        edition: "1st Edition",
-        subject: cleanSubject,
-        total_pages: 0,
-        storage_path: null,
-        file_size_bytes: fileSizeBytes,
-        mime_type: "application/pdf",
-        status: "UPLOADING",
-        status_message: "Uploading original PDF to private cloud storage...",
-      })
-      .select("id")
-      .single();
+    // 3. Check for existing book / idempotency check
+    if (!dbBookId) {
+      const { data: existingBook } = await supabase
+        .from("books")
+        .select("id, status, title")
+        .eq("user_id", userId)
+        .eq("title", cleanTitle)
+        .maybeSingle();
 
-    if (bookCreateErr || !initialBook) {
-      console.error("Failed to create initial book record:", bookCreateErr);
-      throw new Error(`Database error creating book record: ${bookCreateErr?.message || "Insert failed"}`);
+      if (existingBook) {
+        if (existingBook.status === "READY") {
+          // Idempotent: book already processed
+          const { data: pages } = await supabase.from("book_pages").select("*").eq("book_id", existingBook.id);
+          const { data: chapters } = await supabase.from("chapters").select("*, sections(*)").eq("book_id", existingBook.id);
+          const { data: chunks } = await supabase.from("book_chunks").select("*").eq("book_id", existingBook.id);
+
+          return {
+            book: {
+              id: existingBook.id,
+              title: cleanTitle,
+              author: cleanAuthor,
+              edition: "1st Edition",
+              subject: cleanSubject,
+              totalPages: pages?.length || 1,
+              chapters: (chapters || []).map((ch: any) => ({
+                id: ch.id,
+                bookId: existingBook.id,
+                number: ch.number,
+                title: ch.title,
+                startPage: ch.start_page,
+                endPage: ch.end_page,
+                sections: ch.sections || [],
+              })),
+              pages: pages || [],
+              chunks: chunks || [],
+            },
+            chunksCount: chunks?.length || 0,
+            pagesCount: pages?.length || 0,
+            status: "READY",
+            statusMessage: "Document previously processed and ready in library.",
+          };
+        } else if (existingBook.status === "PROCESSING" || existingBook.status === "EMBEDDING") {
+          // Worker concurrency guard: prevent two workers from colliding
+          throw new Error("This document is currently being processed by another worker. Please wait.");
+        }
+        dbBookId = existingBook.id;
+      }
     }
 
-    const currentBookId: string = initialBook.id;
-    dbBookId = currentBookId;
+    // 4. Create or Update Book record to UPLOADING
+    if (!dbBookId) {
+      const { data: initialBook, error: bookCreateErr } = await supabase
+        .from("books")
+        .insert({
+          user_id: userId,
+          title: cleanTitle,
+          author: cleanAuthor,
+          edition: "1st Edition",
+          subject: cleanSubject,
+          total_pages: 1,
+          storage_path: null,
+          file_size_bytes: fileSizeBytes,
+          mime_type: "application/pdf",
+          status: "UPLOADING",
+          status_message: "Uploading original PDF to private cloud storage...",
+        })
+        .select("id")
+        .single();
 
-    // 3. STORE ORIGINAL PDF privately in Supabase Storage
+      if (bookCreateErr || !initialBook) {
+        throw new Error(`Database error creating book record: ${bookCreateErr?.message || "Insert failed"}`);
+      }
+      dbBookId = initialBook.id;
+    } else {
+      await supabase
+        .from("books")
+        .update({
+          status: "UPLOADING",
+          status_message: "Restarting document ingestion...",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", dbBookId);
+    }
+
+    const currentBookId: string = dbBookId as string;
+
+    // 5. STORE ORIGINAL PDF privately in Supabase Storage
     const cleanStoragePath = `${userId}/${currentBookId}/original.pdf`;
     const { data: uploadData, error: uploadErr } = await supabase.storage
       .from("textbooks")
@@ -219,15 +296,6 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
       });
 
     if (uploadErr || !uploadData) {
-      console.error("Storage upload failed:", uploadErr);
-      await supabase
-        .from("books")
-        .update({
-          status: "FAILED",
-          status_message: "Failed to store PDF document in cloud storage.",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", currentBookId);
       throw new Error(`Failed to store PDF document in cloud storage: ${uploadErr?.message || "Storage error"}`);
     }
 
@@ -239,12 +307,12 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
       .update({
         storage_path: storagePath,
         status: "PROCESSING",
-        status_message: "Extracting page text and analyzing textbook structure...",
+        status_message: "Extracting text and analyzing textbook structure...",
         updated_at: new Date().toISOString(),
       })
       .eq("id", currentBookId);
 
-    // 4. EXTRACT PDF page-by-page
+    // 6. EXTRACT PDF page-by-page
     const pageTexts: { pageNum: number; text: string }[] = [];
     let detectedTotalPages = 1;
 
@@ -261,6 +329,13 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
     }
     if (typeof (globalThis as any).Path2D === "undefined") {
       (globalThis as any).Path2D = class Path2D {};
+    }
+
+    // Proactively detect password-protected or encrypted PDFs
+    const rawPdfHead = fileBuffer.slice(0, 4096).toString("latin1");
+    const rawPdfTail = fileBuffer.slice(-4096).toString("latin1");
+    if (rawPdfHead.includes("/Encrypt") || rawPdfTail.includes("/Encrypt")) {
+      throw new Error("Password-protected or encrypted PDF document. Please decrypt the file before indexing.");
     }
 
     try {
@@ -282,6 +357,11 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
       
       // Fallback: extract textual streams directly from PDF object stream
       const rawPdfString = fileBuffer.toString("latin1");
+      const isEncrypted = rawPdfString.includes("/Encrypt") || rawPdfString.includes("/Standard");
+      if (isEncrypted) {
+        throw new Error("Password-protected or encrypted PDF document. Please decrypt the file before indexing.");
+      }
+
       const textMatches = Array.from(rawPdfString.matchAll(/\((.*?)\)\s*Tj/g)).map((m) => m[1]);
       const pageSplits = rawPdfString.split(/\/Type\s*\/Page\b/i);
       detectedTotalPages = Math.max(1, pageSplits.length - 1);
@@ -292,14 +372,6 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
           pageTexts.push({ pageNum: p, text: pageChunk.replace(/\\([()\\])/g, "$1") });
         }
       } else {
-        await supabase
-          .from("books")
-          .update({
-            status: "FAILED",
-            status_message: `Text extraction failed: ${parseErr?.message || "Corrupted or encrypted PDF."}`,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", currentBookId);
         throw new Error(`Failed to extract text from PDF: ${parseErr?.message || "Corrupted or encrypted PDF."}`);
       }
     }
@@ -315,7 +387,7 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
       })
       .eq("id", currentBookId);
 
-    // 5. DETECT CHAPTERS & SECTIONS
+    // 7. DETECT CHAPTERS & SECTIONS
     const detectedChapters: DetectedChapter[] = [];
     let currentChapter: DetectedChapter | null = null;
     let totalExtractedLength = 0;
@@ -371,8 +443,8 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
       currentChapter.endPage = totalPages;
     }
 
-    // Scanned PDF / OCR required check: Do NOT proceed to ready if scanned/image-only
-    const isScannedPdf = totalExtractedLength < 100 || (emptyPageCount / totalPages) > 0.8;
+    // Scanned PDF / OCR required check
+    const isScannedPdf = totalExtractedLength < 50 || (emptyPageCount / totalPages) > 0.8;
     if (isScannedPdf) {
       const ocrMessage = "Your PDF is image-based and requires OCR before AI search can work.";
       await supabase
@@ -407,7 +479,14 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
       };
     }
 
-    // 6. Ingest Chapters into database
+    // Clean up any existing chapters/pages/chunks before inserting to guarantee clean state
+    await Promise.all([
+      supabase.from("chapters").delete().eq("book_id", currentBookId),
+      supabase.from("book_pages").delete().eq("book_id", currentBookId),
+      supabase.from("book_chunks").delete().eq("book_id", currentBookId),
+    ]);
+
+    // 8. Ingest Chapters and Sections into database
     const finalChapters: Chapter[] = [];
     for (const ch of detectedChapters) {
       const { data: chRecord, error: chErr } = await supabase
@@ -423,7 +502,6 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
         .single();
 
       if (chErr || !chRecord) {
-        console.error("Chapter insertion error:", chErr);
         throw new Error(`Database error saving chapters: ${chErr?.message}`);
       }
 
@@ -445,7 +523,6 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
             .single();
 
           if (secErr || !secRecord) {
-            console.error("Section insertion error:", secErr);
             throw new Error(`Database error saving sections: ${secErr?.message}`);
           }
 
@@ -472,20 +549,18 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
       });
     }
 
-    // 7. Ingest Pages linking foreign keys to chapters and sections
+    // 9. Ingest Pages linking foreign keys to chapters and sections
     const pagesToInsert = [];
     for (let i = 1; i <= totalPages; i++) {
       const pageObj = pageTexts.find((p) => p.pageNum === i);
       const pageText = pageObj ? pageObj.text : "";
 
-      // Find matching chapter by page boundary
       const matchingChapter = detectedChapters.find(
         (c) => i >= c.startPage && i <= c.endPage
       );
       const chapterId = matchingChapter?.dbId || null;
       const chapterTitle = matchingChapter?.title || null;
 
-      // Find matching section on this page or within active chapter
       let matchingSection: DetectedSection | undefined;
       if (matchingChapter) {
         const activeSections = matchingChapter.sections.filter((s) => s.pageNumber <= i);
@@ -539,7 +614,6 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
         .select("id, page_number, chapter_id, section_id, title, content, key_takeaways, equations");
 
       if (pageErr || !insertedPages) {
-        console.error("Page insertion error:", pageErr);
         throw new Error(`Database error saving page records: ${pageErr?.message || "Page insert error"}`);
       }
 
@@ -564,7 +638,7 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
 
     finalPages.sort((a, b) => a.pageNumber - b.pageNumber);
 
-    // 8. Create and embed chunks
+    // 10. Create and embed chunks
     const allChunks: BookChunk[] = [];
     const rawChunksToEmbed: {
       pageNumber: number;
@@ -601,7 +675,6 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
     }
 
     if (rawChunksToEmbed.length > 0) {
-      // Update status to EMBEDDING
       await supabase
         .from("books")
         .update({
@@ -617,16 +690,7 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
       try {
         embeddings = await generateBatchEmbeddings(chunkTexts, 5);
       } catch (embErr: any) {
-        console.error("Vector embedding generation error:", embErr);
-        await supabase
-          .from("books")
-          .update({
-            status: "FAILED",
-            status_message: `Embedding generation failed: ${embErr?.message || "AI service error"}`,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", currentBookId);
-        throw new Error(`Failed to generate embeddings: ${embErr?.message || "AI service error"}`);
+        throw new Error(`Embedding generation failed: ${embErr?.message || "AI service error"}`);
       }
 
       const chunkRecords = rawChunksToEmbed.map((chunk, idx) => ({
@@ -650,7 +714,6 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
           .select("id, page_id, chunk_index, page_number, chapter_title, section_title, text, key_terms");
 
         if (chunkErr) {
-          console.error("Chunk insertion error:", chunkErr);
           throw new Error(`Database error saving vector search chunks: ${chunkErr.message}`);
         }
 
@@ -671,7 +734,7 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
       }
     }
 
-    // 9. VERIFY PERSISTENCE (Fail-Closed Check)
+    // 11. VERIFY PERSISTENCE (Fail-Closed Check)
     const [{ count: verifyPagesCount, error: vpErr }, { count: verifyChunksCount, error: vcErr }] = await Promise.all([
       supabase.from("book_pages").select("id", { count: "exact", head: true }).eq("book_id", currentBookId),
       supabase.from("book_chunks").select("id", { count: "exact", head: true }).eq("book_id", currentBookId),
@@ -685,7 +748,7 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
       throw new Error(`Persistence verification failed: expected ${allChunks.length} chunks in DB, found ${verifyChunksCount}`);
     }
 
-    // 10. READY: Only set status READY after all required stages and verifications succeed
+    // 12. READY: Only set status READY after all required stages and verifications succeed
     const readyStatusMessage = emptyPageCount > 0
       ? `Indexed ${totalPages - emptyPageCount} of ${totalPages} pages. Some pages contained only images.`
       : "Document successfully parsed and indexed for RAG.";
@@ -721,7 +784,7 @@ export async function processPdfDocument(options: ProcessDocumentOptions): Promi
       isScannedPdf: false,
     };
   } catch (error: any) {
-    console.error("PDF Processing pipeline error:", error);
+    console.error("PDF Processing pipeline error:", error?.message || error);
 
     if (dbBookId) {
       try {

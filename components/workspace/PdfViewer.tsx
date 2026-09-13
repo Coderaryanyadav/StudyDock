@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { Loader2, AlertCircle, RefreshCw, ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
+import { Loader2, AlertCircle } from "lucide-react";
 import { Highlight, HighlightRect } from "@/types";
 
 interface PdfViewerProps {
@@ -33,7 +33,6 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [docTotalPages, setDocTotalPages] = useState<number>(totalPages);
-  const [renderProgress, setRenderProgress] = useState<boolean>(false);
   const [pageDimensions, setPageDimensions] = useState<{ width: number; height: number }>({
     width: 600,
     height: 800,
@@ -45,7 +44,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   const renderTaskRef = useRef<any>(null);
   const pdfUrl = `/api/books/${encodeURIComponent(bookId)}/pdf`;
 
-  // 1. Initialize and load PDF document with PDF.js
+  // 1. Initialize and load PDF document with local PDF.js worker & cmaps
   const loadPdf = useCallback(async () => {
     let isCancelled = false;
     setLoading(true);
@@ -60,8 +59,9 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       const loadingTask = pdfjsLib.getDocument({
         url: pdfUrl,
         withCredentials: true,
-        cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.296/cmaps/",
+        cMapUrl: "/cmaps/",
         cMapPacked: true,
+        standardFontDataUrl: "/standard_fonts/",
       });
 
       const loadedDoc = await loadingTask.promise;
@@ -93,16 +93,19 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       if (!doc || !canvasRef.current) return;
 
       try {
-        setRenderProgress(true);
         if (renderTaskRef.current) {
-          renderTaskRef.current.cancel();
+          try {
+            renderTaskRef.current.cancel();
+          } catch {
+            // ignore cancellation
+          }
         }
 
-        const targetPageNum = Math.min(Math.max(1, pageNum), doc.numPages);
-        const page = await doc.getPage(targetPageNum);
+        const safePageNum = Math.min(Math.max(1, pageNum), doc.numPages || 1);
+        const page = await doc.getPage(safePageNum);
 
         // DPR-aware crisp rendering
-        const dpr = window.devicePixelRatio || 1.5;
+        const dpr = typeof window !== "undefined" ? Math.min(window.devicePixelRatio || 1.5, 2.5) : 1.5;
         const viewport = page.getViewport({ scale: currentScale * dpr });
         const canvas = canvasRef.current;
         const context = canvas.getContext("2d");
@@ -145,6 +148,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
               textSpan.style.color = "transparent";
               textSpan.style.cursor = "text";
               textSpan.style.whiteSpace = "pre";
+              textSpan.setAttribute("data-text-span", "true");
 
               const tx = item.transform;
               if (tx && tx.length >= 6) {
@@ -162,8 +166,6 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         if (err?.name !== "RenderingCancelledException") {
           console.error("Page render error:", err);
         }
-      } finally {
-        setRenderProgress(false);
       }
     },
     []
@@ -188,22 +190,24 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     try {
       const range = selection.getRangeAt(0);
       const containerRect = textLayerRef.current.getBoundingClientRect();
-      const clientRects = Array.from(range.getClientRects());
+      const rawRects = Array.from(range.getClientRects());
       const bound = range.getBoundingClientRect();
 
       if (containerRect.width > 0 && containerRect.height > 0) {
-        const normalizedRects: HighlightRect[] = clientRects.map((r) => ({
-          x: Math.max(0, (r.left - containerRect.left) / containerRect.width),
-          y: Math.max(0, (r.top - containerRect.top) / containerRect.height),
-          width: Math.min(1, r.width / containerRect.width),
-          height: Math.min(1, r.height / containerRect.height),
+        // Filter out zero-area rects and normalize to 0..1 range
+        const validClient = rawRects.filter((r) => r.width > 0.5 && r.height > 0.5);
+        const normalizedRects: HighlightRect[] = (validClient.length > 0 ? validClient : [bound]).map((r) => ({
+          x: Math.max(0, Math.min(1, Math.round(((r.left - containerRect.left) / containerRect.width) * 10000) / 10000)),
+          y: Math.max(0, Math.min(1, Math.round(((r.top - containerRect.top) / containerRect.height) * 10000) / 10000)),
+          width: Math.max(0.001, Math.min(1, Math.round((r.width / containerRect.width) * 10000) / 10000)),
+          height: Math.max(0.001, Math.min(1, Math.round((r.height / containerRect.height) * 10000) / 10000)),
         }));
 
         const normalizedBounding: HighlightRect = {
-          x: Math.max(0, (bound.left - containerRect.left) / containerRect.width),
-          y: Math.max(0, (bound.top - containerRect.top) / containerRect.height),
-          width: Math.min(1, bound.width / containerRect.width),
-          height: Math.min(1, bound.height / containerRect.height),
+          x: Math.max(0, Math.min(1, Math.round(((bound.left - containerRect.left) / containerRect.width) * 10000) / 10000)),
+          y: Math.max(0, Math.min(1, Math.round(((bound.top - containerRect.top) / containerRect.height) * 10000) / 10000)),
+          width: Math.max(0.001, Math.min(1, Math.round((bound.width / containerRect.width) * 10000) / 10000)),
+          height: Math.max(0.001, Math.min(1, Math.round((bound.height / containerRect.height) * 10000) / 10000)),
         };
 
         if (onSelectionCoords) {
@@ -214,7 +218,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
           });
         }
       }
-    } catch (err) {
+    } catch {
       // selection error
     }
   };
@@ -224,7 +228,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
   if (loading) {
     return (
-      <div className="w-full h-full min-h-[500px] flex flex-col items-center justify-center gap-3 text-slate-400 bg-slate-950 p-6">
+      <div data-testid="pdf-loading-state" className="w-full h-full min-h-[500px] flex flex-col items-center justify-center gap-3 text-slate-400 bg-slate-950 p-6">
         <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
         <p className="text-xs font-medium tracking-wide text-slate-300">
           Loading original PDF textbook...
@@ -236,11 +240,12 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   // Fallback to iframe if canvas rendering is unavailable
   if (error || !pdfDoc) {
     return (
-      <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950 relative min-h-[500px] p-2">
+      <div data-testid="pdf-fallback-container" className="w-full h-full flex flex-col items-center justify-center bg-slate-950 relative min-h-[500px] p-2">
         <iframe
           src={`${pdfUrl}#page=${pageNumber}&zoom=${Math.round(scale * 100)}`}
           className="w-full h-full border-none rounded-xl bg-slate-900 min-h-[600px]"
           title="PDF Viewer"
+          data-testid="pdf-iframe-fallback"
         />
       </div>
     );
@@ -250,16 +255,24 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     <div
       onMouseUp={handleContainerMouseUp}
       ref={containerRef}
+      data-testid="pdf-viewer-container"
       className="w-full flex justify-center py-4 relative select-text overflow-x-auto custom-scrollbar"
     >
-      <div className="relative shadow-2xl rounded-lg overflow-hidden border border-slate-800 bg-white">
-        <canvas ref={canvasRef} className="block select-none" />
+      <div
+        data-testid="pdf-canvas-wrapper"
+        className="relative shadow-2xl rounded-lg overflow-hidden border border-slate-800 bg-white"
+        style={{ width: `${pageDimensions.width}px`, height: `${pageDimensions.height}px` }}
+      >
+        <canvas ref={canvasRef} data-testid="pdf-canvas" className="block select-none" />
 
         {/* Text Layer for mouse selection */}
         <div
           ref={textLayerRef}
+          data-testid="pdf-text-layer"
           className="absolute top-0 left-0 textLayer pointer-events-auto select-text z-10"
           style={{
+            width: `${pageDimensions.width}px`,
+            height: `${pageDimensions.height}px`,
             transformOrigin: "0 0",
             userSelect: "text",
             WebkitUserSelect: "text",
@@ -268,15 +281,16 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
         {/* Persistent Highlights Overlay Layer */}
         <div
+          data-testid="pdf-highlights-layer"
           className="absolute inset-0 pointer-events-none z-10 overflow-hidden"
           style={{ width: `${pageDimensions.width}px`, height: `${pageDimensions.height}px` }}
         >
           {pageHighlights.map((hl) => {
             const colorMap = {
-              yellow: "bg-yellow-400/35 border-b-2 border-yellow-400/80",
-              blue: "bg-cyan-400/35 border-b-2 border-cyan-400/80",
-              green: "bg-emerald-400/35 border-b-2 border-emerald-400/80",
-              pink: "bg-pink-400/35 border-b-2 border-pink-400/80",
+              yellow: "bg-yellow-400/40 border-b-2 border-yellow-400/90",
+              blue: "bg-cyan-400/40 border-b-2 border-cyan-400/90",
+              green: "bg-emerald-400/40 border-b-2 border-emerald-400/90",
+              pink: "bg-pink-400/40 border-b-2 border-pink-400/90",
             };
             const colorClass = colorMap[hl.color] || colorMap.yellow;
 
@@ -284,13 +298,17 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
               return hl.rects.map((r, idx) => (
                 <div
                   key={`${hl.id}-${idx}`}
+                  data-testid="pdf-highlight-rect"
+                  data-highlight-id={hl.id}
+                  data-color={hl.color}
                   className={`absolute rounded-sm ${colorClass}`}
                   style={{
-                    left: `${r.x * 100}%`,
-                    top: `${r.y * 100}%`,
-                    width: `${r.width * 100}%`,
-                    height: `${r.height * 100}%`,
+                    left: `${Math.max(0, Math.min(100, r.x * 100))}%`,
+                    top: `${Math.max(0, Math.min(100, r.y * 100))}%`,
+                    width: `${Math.max(0, Math.min(100, r.width * 100))}%`,
+                    height: `${Math.max(0, Math.min(100, r.height * 100))}%`,
                   }}
+                  title={hl.text}
                 />
               ));
             }
@@ -299,13 +317,17 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
               return (
                 <div
                   key={hl.id}
+                  data-testid="pdf-highlight-rect"
+                  data-highlight-id={hl.id}
+                  data-color={hl.color}
                   className={`absolute rounded-sm ${colorClass}`}
                   style={{
-                    left: `${hl.boundingRect.x * 100}%`,
-                    top: `${hl.boundingRect.y * 100}%`,
-                    width: `${hl.boundingRect.width * 100}%`,
-                    height: `${hl.boundingRect.height * 100}%`,
+                    left: `${Math.max(0, Math.min(100, hl.boundingRect.x * 100))}%`,
+                    top: `${Math.max(0, Math.min(100, hl.boundingRect.y * 100))}%`,
+                    width: `${Math.max(0, Math.min(100, hl.boundingRect.width * 100))}%`,
+                    height: `${Math.max(0, Math.min(100, hl.boundingRect.height * 100))}%`,
                   }}
+                  title={hl.text}
                 />
               );
             }

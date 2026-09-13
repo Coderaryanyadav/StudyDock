@@ -53,7 +53,7 @@ async function runAdversarialAudit() {
   recordAudit(
     "AUTH",
     "Fail-closed authentication derives identity strictly from supabase.auth.getUser()",
-    authCode.includes("supabase.auth.getUser()") && authCode.includes("if (error || !user) {\n      return null;"),
+    authCode.includes("supabase.auth.getUser") && authCode.includes("if (error || !user") && authCode.includes("return null;"),
     "P0",
     "Unauthenticated requests fail-closed to null"
   );

@@ -217,12 +217,18 @@ export async function submitQuizAttempt(
   }
 
   // 3. Compute real time spent and timestamps
-  const startedAt = params.startedAt || new Date(Date.now() - 30000).toISOString();
-  const completedAt = params.completedAt || new Date().toISOString();
+  if (!params.startedAt || !params.completedAt) {
+    throw new Error("startedAt and completedAt timestamps are strictly required.");
+  }
+  
+  const startedAt = params.startedAt;
+  const completedAt = params.completedAt;
+  
+  const calculatedTimeSpent = Math.max(0, Math.round((new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 1000));
   
   const timeSpent = typeof params.timeSpentSeconds === "number" && params.timeSpentSeconds >= 0
     ? Math.round(params.timeSpentSeconds)
-    : Math.max(1, Math.round((new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 1000));
+    : calculatedTimeSpent;
 
   // 4. Save attempt to quiz_attempts table
   const { data: attempt, error: attemptErr } = await supabase

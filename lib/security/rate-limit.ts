@@ -71,13 +71,18 @@ export function validateChatInput(body: any): { isValid: boolean; error?: string
     return { isValid: false, error: "Invalid request payload format." };
   }
 
-  const { question, pageNumber, selectedText, learningMode, videoTimestampSeconds } = body;
+  const { question, message, pageNumber, selectedText, learningMode, videoTimestampSeconds } = body;
+  const queryText = question || message;
 
-  if (!question || typeof question !== "string" || question.trim().length === 0) {
+  if (!queryText || typeof queryText !== "string" || queryText.trim().length === 0) {
     return { isValid: false, error: "Question cannot be empty." };
   }
 
-  if (question.length > 2000) {
+  if (body.action !== "create_conversation" && (!body.bookId || typeof body.bookId !== "string" || !body.bookId.trim())) {
+    return { isValid: false, error: "Book ID is required for AI Tutor queries." };
+  }
+
+  if (queryText.length > 2000) {
     return { isValid: false, error: "Question exceeds maximum length of 2000 characters." };
   }
 

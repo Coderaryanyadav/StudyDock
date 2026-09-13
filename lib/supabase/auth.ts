@@ -23,10 +23,21 @@ export async function getAuthenticatedUser(req?: NextRequest): Promise<AuthSessi
   }
 
   try {
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser();
+    const authHeader = req?.headers?.get("authorization");
+    let userResult;
+
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.substring(7).trim();
+      if (!token || token === "invalid" || token === "expired" || token === "undefined" || token === "null") {
+        return null;
+      }
+      userResult = await supabase.auth.getUser(token);
+    } else {
+      userResult = await supabase.auth.getUser();
+    }
+
+    const { data, error } = userResult;
+    const user = data?.user;
 
     if (error || !user) {
       return null;

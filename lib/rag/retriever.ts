@@ -59,8 +59,9 @@ const RAG_STOPWORDS = new Set([
 /**
  * Calculates keyword and domain token relevance score with stopword filtering.
  */
-function calculateKeywordScore(query: string, text: string, keyTerms: string[] = []): number {
-  const queryTokens = query
+function calculateKeywordScore(query: string = "", text: string = "", keyTerms: string[] = []): number {
+  if (!query || !text) return 0;
+  const queryTokens = (query || "")
     .toLowerCase()
     .replace(/[^\w\s]/g, " ")
     .split(/\s+/)
@@ -68,7 +69,7 @@ function calculateKeywordScore(query: string, text: string, keyTerms: string[] =
 
   if (queryTokens.length === 0) return 0;
 
-  const lowerText = text.toLowerCase();
+  const lowerText = (text || "").toLowerCase();
   let score = 0;
 
   // Exact phrase match of non-trivial query
@@ -86,6 +87,7 @@ function calculateKeywordScore(query: string, text: string, keyTerms: string[] =
 
   // Key terms bonus
   for (const term of keyTerms) {
+    if (!term) continue;
     const lowerTerm = term.toLowerCase();
     for (const token of queryTokens) {
       if (lowerTerm === token || lowerTerm.includes(token)) {
@@ -100,7 +102,7 @@ function calculateKeywordScore(query: string, text: string, keyTerms: string[] =
 /**
  * Executes Production PGVector Semantic Search & Hardened Reranker
  * Strictly queries PostgreSQL pgvector using authenticated match_book_chunks.
- * No in-memory chunk fallbacks, synthetic chunks, or fake citations.
+ * No in-memory chunk fallbacks, synthetic chunks, active-page fallbacks, or fake citations.
  */
 export async function retrieveRelevantContext(
   query: string,
@@ -122,12 +124,33 @@ export async function retrieveRelevantContext(
     throw new Error("Database client is unavailable for vector retrieval.");
   }
 
+  const cleanQuery = (query || "").trim();
+  if (!cleanQuery) {
+    return {
+      activeBook: book,
+      activePageNumber,
+      selectedText,
+      activeVideo,
+      videoTimestampSeconds,
+      relevantChunks: [],
+      citations: [],
+      isOutOfScope: true,
+      retrievalMode: "vector_hybrid",
+    };
+  }
+
   try {
-    const queryEmbedding = await generateEmbedding(query);
+    // Generate query embedding (768 dimensions)
+    const queryEmbedding = await generateEmbedding(cleanQuery);
+    if (!Array.isArray(queryEmbedding) || queryEmbedding.length !== 768) {
+      throw new Error(`Invalid query embedding dimension: ${queryEmbedding?.length || 0}`);
+    }
+
+    // Authenticated vector search with threshold
     const { data, error } = await supabase.rpc("match_book_chunks", {
       query_embedding: queryEmbedding,
-      match_threshold: 0.25,
-      match_count: 12,
+      match_threshold: 0.35,
+      match_count: 10,
       filter_book_id: book.id,
     });
 
@@ -136,8 +159,16 @@ export async function retrieveRelevantContext(
       throw new Error("Vector search index query failed.");
     }
 
-    if (data && data.length > 0) {
+    if (Array.isArray(data) && data.length > 0) {
       for (const match of data) {
+        // Enforce strict book isolation
+        if (match.book_id && match.book_id !== book.id) {
+          continue;
+        }
+
+        const chunkText = match.text || match.content || "";
+        if (!chunkText.trim()) continue;
+
         const chunk: BookChunk = {
           id: match.id,
           bookId: match.book_id || book.id,
@@ -146,30 +177,24 @@ export async function retrieveRelevantContext(
           chapterTitle: match.chapter_title || null,
           sectionId: null,
           sectionTitle: match.section_title || null,
-          pageNumber: match.page_number,
-          text: match.text,
+          pageNumber: Math.max(1, match.page_number || 1),
+          text: chunkText,
           keyTerms: match.key_terms || [],
         };
 
-        const kwScore = calculateKeywordScore(query, chunk.text, chunk.keyTerms);
-        let combinedScore = match.similarity * 0.6 + (kwScore > 0 ? 0.4 : 0);
+        const kwScore = calculateKeywordScore(cleanQuery, chunk.text, chunk.keyTerms);
+        const sim = typeof match.similarity === "number" ? match.similarity : 0;
+        let combinedScore = sim * 0.6 + (kwScore > 0 ? 0.4 : 0);
 
-        // Current page boost
-        if (chunk.pageNumber === activePageNumber) {
-          combinedScore += 0.3;
-        } else if (Math.abs(chunk.pageNumber - activePageNumber) === 1) {
-          combinedScore += 0.15;
-        }
-
-        // Selected text boost
-        if (selectedText && chunk.text.toLowerCase().includes(selectedText.toLowerCase().slice(0, 30))) {
-          combinedScore += 0.5;
+        // Boost for selected text relevance
+        if (selectedText && chunk.text && chunk.text.toLowerCase().includes(selectedText.toLowerCase().slice(0, 30))) {
+          combinedScore += 0.4;
         }
 
         scoredChunks.push({
           chunk,
           score: combinedScore,
-          semanticSimilarity: match.similarity,
+          semanticSimilarity: sim,
           keywordScore: kwScore,
         });
       }
@@ -182,9 +207,9 @@ export async function retrieveRelevantContext(
   // Sort descending by score
   scoredChunks.sort((a, b) => b.score - a.score);
 
-  // Take top chunks with minimum relevance threshold
+  // Take top chunks that pass relevance threshold (>= 0.40)
   const topChunks = scoredChunks
-    .filter((s) => s.score >= 0.45 || (selectedText && s.score >= 0.3))
+    .filter((s) => s.score >= 0.40 || (selectedText && s.score >= 0.25))
     .slice(0, 5)
     .map((s) => s.chunk);
 
@@ -204,7 +229,7 @@ export async function retrieveRelevantContext(
   const matchingVideoSegments: { timestampSeconds: number; formattedTime: string; text: string }[] = [];
   if (activeVideo && activeVideo.transcript && activeVideo.transcript.length > 0) {
     for (const seg of activeVideo.transcript) {
-      const kwScore = calculateKeywordScore(query, seg.text);
+      const kwScore = calculateKeywordScore(cleanQuery, seg.text);
       if (kwScore >= 2.0) {
         matchingVideoSegments.push(seg);
         if (citations.length < 6) {
@@ -233,7 +258,7 @@ export async function retrieveRelevantContext(
     activeVideo,
     videoTimestampSeconds,
     relevantChunks: topChunks,
-    citations,
+    citations: isOutOfScope ? [] : citations,
     isOutOfScope,
     retrievalMode: "vector_hybrid",
   };

@@ -28,6 +28,15 @@ export async function getNotesForBook(
   }));
 }
 
+export function sanitizeNoteText(str: unknown, maxLen = 4000): string {
+  if (typeof str !== "string") return "";
+  return str
+    .replace(/\0/g, "")
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    .trim()
+    .slice(0, maxLen);
+}
+
 export async function saveNote(
   userId: string,
   data: {
@@ -40,14 +49,17 @@ export async function saveNote(
   const supabase = await createServerSupabaseClient();
   if (!supabase || !userId || !data.bookId || !data.content) return null;
 
+  const sanitizedContent = sanitizeNoteText(data.content, 4000);
+  if (!sanitizedContent) return null;
+
   const { data: row, error } = await supabase
     .from("notes")
     .insert({
       user_id: userId,
       book_id: data.bookId,
-      page_number: data.pageNumber || 1,
-      selected_text: data.selectedText ? data.selectedText.slice(0, 2000) : null,
-      content: data.content,
+      page_number: Math.max(1, Math.floor(data.pageNumber || 1)),
+      selected_text: data.selectedText ? sanitizeNoteText(data.selectedText, 2000) : null,
+      content: sanitizedContent,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
@@ -75,10 +87,13 @@ export async function updateNote(
   const supabase = await createServerSupabaseClient();
   if (!supabase || !userId || !noteId || !content) return null;
 
+  const sanitizedContent = sanitizeNoteText(content, 4000);
+  if (!sanitizedContent) return null;
+
   const { data: row, error } = await supabase
     .from("notes")
     .update({
-      content,
+      content: sanitizedContent,
       updated_at: new Date().toISOString(),
     })
     .eq("id", noteId)

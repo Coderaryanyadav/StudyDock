@@ -1,6 +1,15 @@
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { Bookmark, Highlight, HighlightRect } from "@/types";
 
+export function sanitizeText(str: unknown, maxLen = 4000): string {
+  if (typeof str !== "string") return "";
+  return str
+    .replace(/\0/g, "")
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    .trim()
+    .slice(0, maxLen);
+}
+
 export function validateNormalizedRect(rect: HighlightRect): boolean {
   if (typeof rect !== "object" || rect === null) return false;
   const { x, y, width, height } = rect;
@@ -9,15 +18,33 @@ export function validateNormalizedRect(rect: HighlightRect): boolean {
     typeof y === "number" &&
     typeof width === "number" &&
     typeof height === "number" &&
+    !isNaN(x) &&
+    !isNaN(y) &&
+    !isNaN(width) &&
+    !isNaN(height) &&
+    isFinite(x) &&
+    isFinite(y) &&
+    isFinite(width) &&
+    isFinite(height) &&
     x >= 0 &&
     x <= 1 &&
     y >= 0 &&
     y <= 1 &&
-    width >= 0 &&
+    width > 0 &&
     width <= 1 &&
-    height >= 0 &&
+    height > 0 &&
     height <= 1
   );
+}
+
+export function clampNormalizedRect(rect: HighlightRect): HighlightRect | null {
+  if (!validateNormalizedRect(rect)) return null;
+  return {
+    x: Math.max(0, Math.min(1, Math.round(rect.x * 10000) / 10000)),
+    y: Math.max(0, Math.min(1, Math.round(rect.y * 10000) / 10000)),
+    width: Math.max(0.0001, Math.min(1 - rect.x, Math.round(rect.width * 10000) / 10000)),
+    height: Math.max(0.0001, Math.min(1 - rect.y, Math.round(rect.height * 10000) / 10000)),
+  };
 }
 
 export async function getHighlightsForBook(
@@ -93,16 +120,20 @@ export async function saveHighlight(
 
   const validColors = ["yellow", "blue", "green", "pink"];
   const color = data.color && validColors.includes(data.color) ? data.color : "yellow";
+  const sanitizedText = sanitizeText(data.text, 4000);
+  if (!sanitizedText) return null;
 
-  // Validate normalized bounding boxes if provided
-  let validBoundingRect = null;
-  if (data.boundingRect && validateNormalizedRect(data.boundingRect)) {
-    validBoundingRect = data.boundingRect;
+  // Validate and clamp normalized bounding boxes if provided
+  let validBoundingRect: HighlightRect | null = null;
+  if (data.boundingRect) {
+    validBoundingRect = clampNormalizedRect(data.boundingRect);
   }
 
   let validRects: HighlightRect[] = [];
   if (Array.isArray(data.rects)) {
-    validRects = data.rects.filter(validateNormalizedRect);
+    validRects = data.rects
+      .map(clampNormalizedRect)
+      .filter((r): r is HighlightRect => r !== null);
   }
 
   const { data: row, error } = await supabase
@@ -111,9 +142,9 @@ export async function saveHighlight(
       user_id: userId,
       book_id: data.bookId,
       page_number: Math.max(1, Math.floor(data.pageNumber || 1)),
-      text: data.text.slice(0, 4000),
+      text: sanitizedText,
       color,
-      note: data.note ? data.note.slice(0, 2000) : null,
+      note: data.note ? sanitizeText(data.note, 2000) : null,
       bounding_rect: validBoundingRect,
       rects: validRects.length > 0 ? validRects : null,
       created_at: new Date().toISOString(),

@@ -39,6 +39,25 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    if (!startedAt || !completedAt) {
+      return NextResponse.json({ error: "Start and end timestamps are required." }, { status: 400 });
+    }
+
+    const start = new Date(startedAt).getTime();
+    const end = new Date(completedAt).getTime();
+
+    if (isNaN(start) || isNaN(end) || end < start) {
+      return NextResponse.json({ error: "Invalid timestamps provided." }, { status: 400 });
+    }
+
+    if (typeof timeSpentSeconds !== "number" || timeSpentSeconds < 0) {
+      return NextResponse.json({ error: "Invalid time spent." }, { status: 400 });
+    }
+
+    if (pageNumber === undefined || pageNumber === null || isNaN(Number(pageNumber))) {
+      return NextResponse.json({ error: "Valid page number is required." }, { status: 400 });
+    }
+
     const result = await submitQuizAttempt(userId, {
       quizId,
       bookId,
@@ -48,7 +67,7 @@ export async function POST(req: NextRequest) {
       timeSpentSeconds,
       concept,
       chapterTitle,
-      pageNumber: Number(pageNumber) || 1,
+      pageNumber: Number(pageNumber),
     });
 
     if (!result) {
@@ -62,8 +81,8 @@ export async function POST(req: NextRequest) {
     await recordStudyEvent(userId, {
       bookId,
       eventType: "quiz_completed",
-      pageNumber: Number(pageNumber) || 1,
-      durationSeconds: Number(timeSpentSeconds) || 0,
+      pageNumber: Number(pageNumber),
+      durationSeconds: Number(timeSpentSeconds),
       metadata: {
         quizId,
         score: result.score,

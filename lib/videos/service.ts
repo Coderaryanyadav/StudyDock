@@ -76,8 +76,26 @@ export async function attachVideoToBook(
 
   // 1. Fetch real metadata via oEmbed standard
   const metadata = await fetchYoutubeMetadata(youtubeId);
-  const resolvedTitle = customTitle?.trim() || metadata?.title || "Metadata unavailable";
-  const resolvedChannel = metadata?.channelName || null;
+  if (!metadata) {
+    console.warn(`Video ${youtubeId} metadata unavailable. Rejecting to prevent fabrication.`);
+    return null;
+  }
+
+  // Prevent duplicate attachment
+  const { data: existingVideo } = await supabase
+    .from("videos")
+    .select("id")
+    .eq("book_id", bookId)
+    .eq("youtube_id", youtubeId)
+    .maybeSingle();
+
+  if (existingVideo) {
+    console.warn(`Video ${youtubeId} already attached to book ${bookId}`);
+    return null;
+  }
+
+  const resolvedTitle = customTitle?.trim() || metadata.title;
+  const resolvedChannel = metadata.channelName || null;
 
   // 2. Insert into videos table
   const { data: videoRow, error } = await supabase

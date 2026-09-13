@@ -88,6 +88,7 @@ export const TextbookSelectionToolbar: React.FC<TextbookSelectionToolbarProps> =
 
       <button
         onClick={() => onAction("highlight")}
+        data-testid="toolbar-highlight-btn"
         className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-amber-500/20 text-amber-300 transition-colors"
         title="Highlight selection and save"
       >
@@ -97,6 +98,7 @@ export const TextbookSelectionToolbar: React.FC<TextbookSelectionToolbarProps> =
 
       <button
         onClick={() => onAction("note")}
+        data-testid="toolbar-note-btn"
         className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-indigo-500/20 text-indigo-300 transition-colors"
         title="Add study note for this selection"
       >

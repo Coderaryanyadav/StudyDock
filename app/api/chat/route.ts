@@ -66,7 +66,8 @@ export async function POST(req: NextRequest) {
     }
 
     const {
-      question,
+      question: rawQuestion,
+      message: rawMessage,
       pageNumber = 1,
       selectedText,
       learningMode = "explain",
@@ -74,6 +75,7 @@ export async function POST(req: NextRequest) {
       bookId,
       conversationId,
     } = body;
+    const question = (rawQuestion || rawMessage || "").trim();
 
     if (!bookId) {
       return NextResponse.json({ error: "Book ID is required." }, { status: 400 });

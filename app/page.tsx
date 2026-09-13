@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Book, StudentProgress, VideoLecture } from "@/types";
 import { BookOpen, Upload } from "lucide-react";
 import { WorkspaceNavbar } from "@/components/navbar/WorkspaceNavbar";
@@ -175,6 +175,12 @@ export default function Home() {
     }
   };
 
+  useEffect(() => {
+    if (currentView === "dashboard") {
+      fetchUserProgress();
+    }
+  }, [currentView]);
+
   const fetchUserBooksAndLoadLatest = async () => {
     try {
       const res = await fetch("/api/books");
@@ -239,19 +245,16 @@ export default function Home() {
     }
   }, []);
 
-  // Persist reading position to database when page changes
-  useEffect(() => {
-    if (activeBook && activeBook.id) {
-      const timeout = setTimeout(() => {
-        fetch(`/api/books/${activeBook.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ lastPageRead: activePageNumber }),
-        }).catch(() => {});
-      }, 1000);
-      return () => clearTimeout(timeout);
+  const handlePageChange = useCallback((newPage: number) => {
+    setActivePageNumber(newPage);
+    if (activeBook?.id) {
+      fetch(`/api/books/${activeBook.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lastPageRead: newPage }),
+      }).catch(() => {});
     }
-  }, [activeBook, activeBook?.id, activePageNumber]);
+  }, [activeBook?.id]);
 
   // Global Keyboard Shortcuts
   useEffect(() => {
@@ -264,9 +267,9 @@ export default function Home() {
       }
 
       if (e.key === "ArrowLeft") {
-        setActivePageNumber((prev) => Math.max(1, prev - 1));
+        handlePageChange(Math.max(1, activePageNumber - 1));
       } else if (e.key === "ArrowRight") {
-        setActivePageNumber((prev) => Math.min(activeBook?.totalPages || 100, prev + 1));
+        handlePageChange(Math.min(activeBook?.totalPages || 100, activePageNumber + 1));
       } else if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
         setIsCommandPaletteOpen((prev) => !prev);
@@ -280,7 +283,7 @@ export default function Home() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeBook?.totalPages]);
+  }, [activeBook?.totalPages, activePageNumber, handlePageChange]);
 
   const handleOpenQuizModal = async () => {
     setIsQuizModalOpen(true);
@@ -426,7 +429,7 @@ export default function Home() {
             <WorkspaceLayout
               book={activeBook}
               activePageNumber={activePageNumber}
-              onPageChange={setActivePageNumber}
+              onPageChange={handlePageChange}
               video={activeVideo}
               onUpdateVideo={setActiveVideo}
               targetCitationPage={targetCitationPage}
@@ -435,7 +438,7 @@ export default function Home() {
               onLaunchFlashcards={handleOpenFlashcardsModal}
             />
           ) : (
-            <div className="flex flex-col items-center justify-center h-full p-6 text-center space-y-5 bg-[#080c14]">
+            <div data-testid="empty-library-upload-prompt" className="flex flex-col items-center justify-center h-full p-6 text-center space-y-5 bg-[#080c14]">
               <div className="w-16 h-16 bg-[#0f1624] rounded-xl flex items-center justify-center border border-slate-800 text-indigo-400">
                 <BookOpen className="w-8 h-8" />
               </div>

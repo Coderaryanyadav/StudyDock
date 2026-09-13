@@ -414,7 +414,7 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
               onChange={(e) => setPageInputVal(e.target.value)}
               className="w-10 h-6 bg-slate-800 text-center font-mono font-bold text-white text-xs rounded border border-slate-700 focus:outline-none focus:border-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-500"
             />
-            <span className="text-slate-500 font-mono text-[11px]">/ {totalPagesCount}</span>
+            <span data-testid="total-pages-count" className="text-slate-500 font-mono text-[11px]">/ {totalPagesCount}</span>
           </form>
 
           <button
@@ -452,27 +452,81 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
           <div className="hidden sm:flex items-center gap-1 border-l border-slate-800 pl-1.5">
             <button
               onClick={() => setZoomLevel((prev) => Math.max(50, prev - 10))}
+              data-testid="zoom-out-btn"
               aria-label="Zoom Out"
               className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
               title="Zoom Out"
             >
               <ZoomOut className="w-3.5 h-3.5" />
             </button>
-            <span className="font-mono text-[11px] text-slate-400 w-9 text-center">
+            <span data-testid="zoom-level-indicator" className="font-mono text-[11px] text-slate-400 w-10 text-center">
               {zoomLevel}%
             </span>
             <button
               onClick={() => setZoomLevel((prev) => Math.min(200, prev + 10))}
+              data-testid="zoom-in-btn"
               aria-label="Zoom In"
               className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
               title="Zoom In"
             >
               <ZoomIn className="w-3.5 h-3.5" />
             </button>
+
+            {/* Quick Zoom Presets */}
+            <div className="hidden xl:flex items-center gap-0.5 ml-1 border-l border-slate-800/80 pl-1">
+              <button
+                onClick={() => setZoomLevel(50)}
+                data-testid="zoom-50-btn"
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${zoomLevel === 50 ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
+              >
+                50%
+              </button>
+              <button
+                onClick={() => setZoomLevel(100)}
+                data-testid="zoom-100-btn"
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${zoomLevel === 100 ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
+              >
+                100%
+              </button>
+              <button
+                onClick={() => setZoomLevel(150)}
+                data-testid="zoom-150-btn"
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${zoomLevel === 150 ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
+              >
+                150%
+              </button>
+              <button
+                onClick={() => setZoomLevel(200)}
+                data-testid="zoom-200-btn"
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${zoomLevel === 200 ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"}`}
+              >
+                200%
+              </button>
+            </div>
+
+            {/* Fit to Width Button */}
+            <button
+              onClick={() => {
+                if (contentRef.current) {
+                  const availableWidth = contentRef.current.clientWidth - 48;
+                  const calculated = Math.min(200, Math.max(50, Math.round((availableWidth / 620) * 100)));
+                  setZoomLevel(calculated);
+                } else {
+                  setZoomLevel(100);
+                }
+              }}
+              data-testid="fit-width-btn"
+              aria-label="Fit to Width"
+              className="px-1.5 py-0.5 rounded text-[10px] font-medium text-slate-400 hover:text-indigo-300 hover:bg-slate-800 transition-colors ml-1"
+              title="Fit to Width"
+            >
+              Fit
+            </button>
           </div>
 
           <button
             onClick={() => setViewMode(viewMode === "pdf" ? "text" : "pdf")}
+            data-testid="view-mode-toggle-btn"
             aria-label={`Switch to ${viewMode === "pdf" ? "Text" : "PDF"} mode`}
             className="hidden md:flex items-center gap-1 px-2 py-1 rounded-md bg-slate-800/80 hover:bg-slate-800 text-slate-300 text-[11px] font-medium transition-colors border border-slate-700/60 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
           >
@@ -537,23 +591,28 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
           <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar text-xs">
             {bookmarks.length > 0 ? (
               bookmarks.map((pageNum) => (
-                <button
+                <div
                   key={pageNum}
-                  onClick={() => {
-                    onPageChange(pageNum);
-                    setShowBookmarks(false);
-                  }}
-                  className="w-full text-left p-2.5 rounded-md bg-slate-900 border border-slate-800 hover:border-indigo-500/50 flex items-center justify-between transition-colors text-slate-200"
+                  data-testid="bookmark-item"
+                  data-page-number={pageNum}
+                  className="w-full p-2.5 rounded-md bg-slate-900 border border-slate-800 hover:border-indigo-500/50 flex items-center justify-between transition-colors text-slate-200"
                 >
-                  <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      onPageChange(pageNum);
+                      setShowBookmarks(false);
+                    }}
+                    data-testid="bookmark-jump-btn"
+                    className="flex items-center gap-2 text-left flex-1"
+                  >
                     <Bookmark className="w-3.5 h-3.5 text-amber-400" />
                     <span>Page {pageNum}</span>
-                  </div>
+                  </button>
                   <span className="text-[10px] text-indigo-400 font-medium">Jump →</span>
-                </button>
+                </div>
               ))
             ) : (
-              <div className="p-6 text-center text-slate-500 text-xs">No bookmarks saved yet.</div>
+              <div data-testid="empty-bookmarks-msg" className="p-6 text-center text-slate-500 text-xs">No bookmarks saved yet.</div>
             )}
           </div>
         </div>
@@ -575,6 +634,8 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
               highlights.map((hl) => (
                 <div
                   key={hl.id}
+                  data-testid="highlight-item"
+                  data-highlight-id={hl.id}
                   className="p-3 rounded-md bg-slate-900 border border-slate-800 space-y-2 text-slate-200"
                 >
                   <p className="line-clamp-3 italic text-[11px] text-slate-300 border-l-2 border-indigo-400 pl-2">
@@ -586,12 +647,14 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
                         onPageChange(hl.pageNumber);
                         setShowHighlights(false);
                       }}
+                      data-testid="highlight-jump-btn"
                       className="text-indigo-400 hover:text-indigo-300 font-mono text-[11px]"
                     >
                       Page {hl.pageNumber} →
                     </button>
                     <button
                       onClick={() => handleDeleteHighlight(hl.id)}
+                      data-testid="highlight-delete-btn"
                       className="p-1 text-slate-500 hover:text-rose-400 transition-colors"
                       title="Delete highlight"
                     >
@@ -601,7 +664,7 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
                 </div>
               ))
             ) : (
-              <div className="p-6 text-center text-slate-500 text-xs">Select text in the reader to highlight passages.</div>
+              <div data-testid="empty-highlights-msg" className="p-6 text-center text-slate-500 text-xs">Select text in the reader to highlight passages.</div>
             )}
           </div>
         </div>
@@ -646,11 +709,14 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
             {notes.map((note) => (
               <div
                 key={note.id}
+                data-testid="note-item"
+                data-note-id={note.id}
                 className="p-3 rounded-md bg-slate-900 border border-slate-800 space-y-2 text-slate-200"
               >
                 {editingNoteId === note.id ? (
                   <div className="space-y-2">
                     <textarea
+                      data-testid="edit-note-input"
                       value={editingContent}
                       onChange={(e) => setEditingContent(e.target.value)}
                       rows={3}
@@ -665,6 +731,7 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
                       </button>
                       <button
                         onClick={() => handleUpdateNote(note.id)}
+                        data-testid="update-note-btn"
                         className="px-2.5 py-1 rounded bg-indigo-600 text-white text-[11px] font-semibold"
                       >
                         Save
@@ -678,10 +745,11 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
                         &ldquo;{note.selectedText}&rdquo;
                       </p>
                     )}
-                    <p className="text-xs text-slate-100 whitespace-pre-wrap">{note.content}</p>
+                    <p data-testid="note-content" className="text-xs text-slate-100 whitespace-pre-wrap">{note.content}</p>
                     <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 text-[10px] text-slate-500">
                       <button
                         onClick={() => onPageChange(note.pageNumber)}
+                        data-testid="note-jump-btn"
                         className="text-indigo-400 hover:text-indigo-300 font-mono"
                       >
                         Page {note.pageNumber} →
@@ -692,6 +760,7 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
                             setEditingNoteId(note.id);
                             setEditingContent(note.content);
                           }}
+                          data-testid="note-edit-btn"
                           className="p-1 hover:text-slate-200"
                           title="Edit note"
                         >
@@ -699,6 +768,7 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
                         </button>
                         <button
                           onClick={() => handleDeleteNote(note.id)}
+                          data-testid="note-delete-btn"
                           className="p-1 hover:text-rose-400"
                           title="Delete note"
                         >

@@ -42,20 +42,7 @@ export async function streamTutorResponse(
   const modeConfig = LEARNING_MODES[mode] || LEARNING_MODES.explain;
 
   if (!apiKey || apiKey.trim() === "" || apiKey === "your_gemini_api_key_here") {
-    const errorNotice = `### ⚠️ Gemini API Key Required
-
-The StudyDock AI Tutor requires a valid \`GEMINI_API_KEY\` to answer questions grounded on your uploaded textbook.
-
-To configure your API key:
-1. Open or create \`.env.local\` in your project root
-2. Add:
-\`\`\`env
-GEMINI_API_KEY="your-actual-gemini-api-key"
-\`\`\`
-3. Restart your dev server (\`npm run dev\`)`;
-
-    callbacks.onChunk(errorNotice);
-    callbacks.onComplete(errorNotice);
+    callbacks.onError(new Error("GEMINI_API_KEY is unconfigured in server environment."));
     return;
   }
 
@@ -76,15 +63,14 @@ GEMINI_API_KEY="your-actual-gemini-api-key"
       callbacks.onChunk(fullText);
     }
 
+    if (!fullText.trim()) {
+      callbacks.onError(new Error("Gemini returned an empty response."));
+      return;
+    }
+
     callbacks.onComplete(fullText);
   } catch (error: any) {
     console.error("Gemini API stream error:", error?.message || error);
-    const failureMsg = `### ⚠️ AI Tutor Service Unavailable
-
-I encountered an issue connecting to the Gemini AI service: **${error?.message || "Rate limit or network error"}**.
-
-Please try asking your question again in a moment.`;
-    callbacks.onChunk(failureMsg);
-    callbacks.onComplete(failureMsg);
+    callbacks.onError(error instanceof Error ? error : new Error(String(error?.message || error)));
   }
 }

@@ -58,16 +58,38 @@ const globalMockDb: MockDb = (global as any).__mockSupabaseDb || {
 function getUserFromToken(token: string) {
   if (!token) return null;
   const clean = token.replace(/^Bearer\s+/i, "").trim();
+  if (
+    !clean ||
+    clean === "invalid" ||
+    clean === "expired" ||
+    clean.includes("expired") ||
+    clean.includes("invalid") ||
+    clean === "undefined" ||
+    clean === "null" ||
+    clean === "logged_out"
+  ) {
+    return null;
+  }
   if (clean.includes("22222222") || clean.includes("bob")) {
     return {
       id: "22222222-2222-4222-8222-222222222222",
       email: "scholar.bob@studydock.internal",
     };
   }
-  return {
-    id: "11111111-1111-4111-8111-111111111111",
-    email: "scholar.alice@studydock.internal",
-  };
+  if (clean.includes("11111111") || clean.includes("alice")) {
+    return {
+      id: "11111111-1111-4111-8111-111111111111",
+      email: "scholar.alice@studydock.internal",
+    };
+  }
+  if (clean.startsWith("mock-jwt-token-")) {
+    const id = clean.replace("mock-jwt-token-", "");
+    return {
+      id,
+      email: `scholar.${id.slice(0, 8)}@studydock.internal`,
+    };
+  }
+  return null;
 }
 
 export async function HEAD(req: NextRequest, { params }: { params: Promise<{ slug: string[] }> }) {
@@ -154,6 +176,27 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
       }
     }
 
+    // Support simple child table joins
+    const selectParam = url.searchParams.get("select") || "";
+    if (selectParam) {
+      filtered = filtered.map((r) => {
+        const item = { ...r };
+        if (selectParam.includes("quiz_questions") && table === "quizzes") {
+          item.quiz_questions = (globalMockDb.quiz_questions || []).filter((qq) => qq.quiz_id === r.id);
+        }
+        if (selectParam.includes("messages") && table === "conversations") {
+          item.messages = (globalMockDb.messages || []).filter((m) => m.conversation_id === r.id);
+        }
+        if (selectParam.includes("chapters") && table === "books") {
+          item.chapters = (globalMockDb.chapters || []).filter((c) => c.book_id === r.id);
+        }
+        if (selectParam.includes("book_pages") && table === "books") {
+          item.book_pages = (globalMockDb.book_pages || []).filter((p) => p.book_id === r.id);
+        }
+        return item;
+      });
+    }
+
     // Check single object requested via headers
     const isSingle = req.headers.get("accept")?.includes("vnd.pgrst.object+json");
     if (isSingle) {
@@ -232,19 +275,72 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
 
   // 4. RPC: POST /rest/v1/rpc/match_book_chunks
   if (path.includes("rest/v1/rpc/match_book_chunks")) {
+    const authHeader = req.headers.get("authorization") || "";
+    const user = getUserFromToken(authHeader);
+    if (!user) {
+      return NextResponse.json({ error: "Authentication required for vector retrieval." }, { status: 401 });
+    }
+
     const body = await req.json();
-    const { filter_book_id } = body;
-    const chunks = (globalMockDb.book_chunks || []).filter((c) => !filter_book_id || c.book_id === filter_book_id);
-    return NextResponse.json(
-      chunks.slice(0, 5).map((c, i) => ({
-        id: c.id,
-        book_id: c.book_id,
-        chunk_index: c.chunk_index,
-        content: c.content,
-        similarity: 0.95 - i * 0.05,
-        token_count: c.token_count || 100,
-      }))
-    );
+    const { query_embedding, match_threshold = 0.35, match_count = 10, filter_book_id } = body;
+
+    if (!filter_book_id) {
+      return NextResponse.json({ error: "filter_book_id is required." }, { status: 400 });
+    }
+
+    // Verify user owns the target book
+    const book = (globalMockDb.books || []).find((b) => b.id === filter_book_id && b.user_id === user.id);
+    if (!book) {
+      return NextResponse.json([]);
+    }
+
+    function calcCosSim(a: number[], b: number[]): number {
+      if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return 0;
+      let dot = 0, nA = 0, nB = 0;
+      for (let i = 0; i < a.length; i++) {
+        dot += a[i] * b[i];
+        nA += a[i] * a[i];
+        nB += b[i] * b[i];
+      }
+      return nA > 0 && nB > 0 ? dot / (Math.sqrt(nA) * Math.sqrt(nB)) : 0;
+    }
+
+    const allChunks = (globalMockDb.book_chunks || []).filter((c) => c.book_id === filter_book_id);
+    const matches: any[] = [];
+
+    for (const c of allChunks) {
+      const sim = Array.isArray(c.embedding) && Array.isArray(query_embedding)
+        ? calcCosSim(query_embedding, c.embedding)
+        : 0;
+
+      if (sim >= match_threshold) {
+        // Resolve joined page, chapter, and section titles
+        const page = (globalMockDb.book_pages || []).find((p) => p.id === c.page_id);
+        const chapter = page?.chapter_id
+          ? (globalMockDb.chapters || []).find((ch) => ch.id === page.chapter_id)
+          : null;
+        const section = page?.section_id
+          ? (globalMockDb.sections || []).find((sec) => sec.id === page.section_id)
+          : null;
+
+        matches.push({
+          id: c.id,
+          book_id: c.book_id,
+          page_id: c.page_id || page?.id || null,
+          chunk_index: c.chunk_index,
+          page_number: c.page_number || page?.page_number || 1,
+          chapter_title: chapter?.title || c.chapter_title || null,
+          section_title: section?.title || c.section_title || null,
+          text: c.text || c.content || "",
+          content: c.text || c.content || "",
+          key_terms: c.key_terms || [],
+          similarity: sim,
+        });
+      }
+    }
+
+    matches.sort((a, b) => b.similarity - a.similarity);
+    return NextResponse.json(matches.slice(0, match_count));
   }
 
   // 5. PostgREST: POST /rest/v1/[table]

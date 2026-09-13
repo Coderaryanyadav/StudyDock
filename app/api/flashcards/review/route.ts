@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 import {
   getFlashcardsForBook,
   saveFlashcardReview,
@@ -61,6 +62,21 @@ export async function POST(req: NextRequest) {
         { error: "Invalid status value. Must be 'learning' or 'mastered'." },
         { status: 400 }
       );
+    }
+
+    const supabase = await createServerSupabaseClient();
+    if (supabase) {
+      const { data: card, error: cardErr } = await supabase
+        .from("flashcards")
+        .select("id, user_id, book_id")
+        .eq("id", flashcardId)
+        .single();
+      if (cardErr || !card) {
+        return NextResponse.json({ error: "Flashcard not found." }, { status: 404 });
+      }
+      if (card.user_id !== userId) {
+        return NextResponse.json({ error: "Access denied. You do not own this flashcard." }, { status: 403 });
+      }
     }
 
     const success = await saveFlashcardReview(userId, flashcardId, status);

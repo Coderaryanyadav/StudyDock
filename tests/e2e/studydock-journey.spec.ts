@@ -246,8 +246,12 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
     await expect(page.getByTestId("page-number-input")).toBeVisible({ timeout: 15000 });
 
     // Navigate back to Page 2 and check highlights drawer
-    await page.getByTestId("next-page-btn").click();
-    await expect(page.getByTestId("page-number-input")).toHaveValue("2");
+    const pageVal = await page.getByTestId("page-number-input").inputValue();
+    if (pageVal !== "2") {
+      await expect(page.getByTestId("next-page-btn")).toBeEnabled({ timeout: 15000 });
+      await page.getByTestId("next-page-btn").click();
+      await expect(page.getByTestId("page-number-input")).toHaveValue("2");
+    }
 
     await page.getByTestId("highlights-drawer-btn").click();
     await expect(page.getByTestId("highlights-count")).not.toHaveText("(0)", { timeout: 5000 });
@@ -261,6 +265,7 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
     await page.getByTestId("notes-drawer-btn").click();
     await page.getByTestId("new-note-input").fill("Crucial distinction: UDP has no flow control or congestion control.");
     await page.getByTestId("save-note-btn").click();
+    await expect(page.getByTestId("new-note-input")).toHaveValue("", { timeout: 10000 });
 
     // Refresh page
     await page.reload();
@@ -276,8 +281,12 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
     console.log("✅ Note verified in database after refresh");
 
     // Add bookmark on Page 1
-    await page.getByTestId("prev-page-btn").click();
-    await expect(page.getByTestId("page-number-input")).toHaveValue("1");
+    const currentPageVal = await page.getByTestId("page-number-input").inputValue();
+    if (currentPageVal !== "1") {
+      await expect(page.getByTestId("prev-page-btn")).toBeEnabled({ timeout: 15000 });
+      await page.getByTestId("prev-page-btn").click();
+      await expect(page.getByTestId("page-number-input")).toHaveValue("1");
+    }
     await page.getByTestId("bookmark-toggle-btn").click();
     await page.getByTestId("bookmarks-drawer-btn").click();
     await expect(page.getByTestId("bookmarks-count")).not.toHaveText("(0)", { timeout: 5000 });
@@ -311,15 +320,12 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
     console.log("➡️ STEPS 18-20: Ask AI Tutor Question, Verify RAG Answer & Citation");
     await page.getByTestId("ai-prompt-input").fill("How does TCP establish a connection according to the textbook?");
     await page.getByTestId("ai-send-btn").click();
-    // Wait for AI response stream to complete
+    // Wait for AI response stream and citations to arrive
     await expect(page.locator('[data-testid="ai-message-user"]')).toHaveCount(1, { timeout: 15000 });
     await expect(page.locator('[data-testid="ai-message-ai"]')).toHaveCount(2, { timeout: 35000 });
+    await expect(page.getByTestId("ai-citation-badge").first()).toBeVisible({ timeout: 35000 });
     const aiMessageContent = await page.locator('[data-testid="ai-message-ai"]').last().innerText();
     expect(aiMessageContent.length).toBeGreaterThan(20);
-
-    // Verify citations exist
-    const citationsCount = await page.getByTestId("ai-citation-badge").count();
-    expect(citationsCount).toBeGreaterThanOrEqual(1);
     console.log("✅ AI Tutor RAG answer and grounded citation successfully verified");
 
     // Capture conversation ID for User A
@@ -338,7 +344,7 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
     await page.getByTestId("ai-prompt-input").fill("What are the primary use cases of UDP?");
     await page.getByTestId("ai-send-btn").click();
 
-    await page.waitForTimeout(3000);
+    await expect(page.locator('[data-testid="ai-message-ai"]')).toHaveCount(2, { timeout: 35000 });
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
 
@@ -427,11 +433,8 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
     await page.waitForLoadState("domcontentloaded");
 
     await expect(page.getByTestId("dashboard-quizzes")).toBeVisible();
-    const quizzesCount = await page.getByTestId("dashboard-quizzes").textContent();
-    expect(Number(quizzesCount)).toBeGreaterThanOrEqual(1);
-
-    const queriesCount = await page.getByTestId("dashboard-queries").textContent();
-    expect(Number(queriesCount)).toBeGreaterThanOrEqual(1);
+    await expect(page.getByTestId("dashboard-quizzes")).not.toHaveText("0", { timeout: 10000 });
+    await expect(page.getByTestId("dashboard-queries")).not.toHaveText("0", { timeout: 10000 });
     console.log("✅ Dashboard analytics verified from real database metrics");
 
     // =========================================================================

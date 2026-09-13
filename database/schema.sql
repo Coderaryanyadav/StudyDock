@@ -3,9 +3,20 @@
 -- Multi-tenant Academic Learning Platform with Strict Row Level Security (RLS)
 -- ==============================================================================
 
--- 1. Enable pgvector extension for semantic AI embeddings (Google text-embedding-004: 768 dims)
+-- 1. Extensions
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- ------------------------------------------------------------------------------
+-- HELPER TRIGGERS: AUTO-UPDATE updated_at
+-- ------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
 -- ------------------------------------------------------------------------------
 -- PROFILES / USERS
@@ -15,8 +26,8 @@ CREATE TABLE IF NOT EXISTS profiles (
     email TEXT UNIQUE NOT NULL,
     display_name TEXT,
     avatar_url TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ------------------------------------------------------------------------------
@@ -40,21 +51,21 @@ CREATE TABLE IF NOT EXISTS books (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
-    author TEXT DEFAULT 'Unknown Author',
+    author TEXT NOT NULL DEFAULT 'Unknown Author',
     edition TEXT DEFAULT '1st Edition',
     subject TEXT DEFAULT 'General Studies',
-    total_pages INT DEFAULT 1,
+    total_pages INT NOT NULL DEFAULT 1 CHECK (total_pages >= 1),
     cover_image TEXT,
     storage_path TEXT,
-    file_size_bytes BIGINT,
+    file_size_bytes BIGINT CHECK (file_size_bytes IS NULL OR file_size_bytes > 0),
     mime_type TEXT DEFAULT 'application/pdf',
-    status document_status DEFAULT 'READY',
+    status document_status NOT NULL DEFAULT 'READY',
     status_message TEXT,
-    last_page_read INT DEFAULT 1,
+    last_page_read INT NOT NULL DEFAULT 1 CHECK (last_page_read >= 1),
     youtube_url TEXT,
     video_title TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ------------------------------------------------------------------------------
@@ -63,11 +74,12 @@ CREATE TABLE IF NOT EXISTS books (
 CREATE TABLE IF NOT EXISTS chapters (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     book_id UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-    number INT NOT NULL,
+    number INT NOT NULL CHECK (number >= 1),
     title TEXT NOT NULL,
-    start_page INT NOT NULL,
-    end_page INT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    start_page INT NOT NULL CHECK (start_page >= 1),
+    end_page INT NOT NULL CHECK (end_page >= start_page),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_book_chapter_number UNIQUE(book_id, number)
 );
 
 CREATE TABLE IF NOT EXISTS sections (
@@ -75,8 +87,8 @@ CREATE TABLE IF NOT EXISTS sections (
     chapter_id UUID NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
     number TEXT NOT NULL,
     title TEXT NOT NULL,
-    page_number INT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    page_number INT NOT NULL CHECK (page_number >= 1),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ------------------------------------------------------------------------------
@@ -87,12 +99,12 @@ CREATE TABLE IF NOT EXISTS book_pages (
     book_id UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
     chapter_id UUID REFERENCES chapters(id) ON DELETE SET NULL,
     section_id UUID REFERENCES sections(id) ON DELETE SET NULL,
-    page_number INT NOT NULL,
+    page_number INT NOT NULL CHECK (page_number >= 1),
     title TEXT NOT NULL,
     content TEXT NOT NULL,
-    key_takeaways TEXT[] DEFAULT '{}',
-    equations TEXT[] DEFAULT '{}',
-    created_at TIMESTAMPTZ DEFAULT NOW(),
+    key_takeaways TEXT[] NOT NULL DEFAULT '{}',
+    equations TEXT[] NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT unique_book_page UNIQUE(book_id, page_number)
 );
 
@@ -103,18 +115,18 @@ CREATE TABLE IF NOT EXISTS book_chunks (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     book_id UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
     page_id UUID REFERENCES book_pages(id) ON DELETE CASCADE,
-    chunk_index INT NOT NULL DEFAULT 0,
-    page_number INT NOT NULL,
+    chunk_index INT NOT NULL DEFAULT 0 CHECK (chunk_index >= 0),
+    page_number INT NOT NULL CHECK (page_number >= 1),
     chapter_title TEXT,
     section_title TEXT,
     text TEXT NOT NULL,
-    key_terms TEXT[] DEFAULT '{}',
+    key_terms TEXT[] NOT NULL DEFAULT '{}',
     embedding vector(768), -- Google Gemini text-embedding-004 dimensions
-    created_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT unique_book_chunk UNIQUE(book_id, chunk_index)
 );
 
--- Create HNSW vector similarity index for fast cosine retrieval
+-- HNSW vector similarity index for fast cosine retrieval
 CREATE INDEX IF NOT EXISTS book_chunks_embedding_idx ON book_chunks USING hnsw (embedding vector_cosine_ops);
 CREATE INDEX IF NOT EXISTS book_chunks_book_page_idx ON book_chunks (book_id, page_number);
 
@@ -128,42 +140,42 @@ CREATE TABLE IF NOT EXISTS videos (
     youtube_id TEXT NOT NULL,
     title TEXT NOT NULL,
     channel_name TEXT,
-    duration_seconds INT DEFAULT 0,
-    formatted_duration TEXT DEFAULT '00:00',
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    duration_seconds INT NOT NULL DEFAULT 0 CHECK (duration_seconds >= 0),
+    formatted_duration TEXT NOT NULL DEFAULT '00:00',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS video_segments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     video_id UUID NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
-    timestamp_seconds INT NOT NULL,
+    timestamp_seconds INT NOT NULL CHECK (timestamp_seconds >= 0),
     formatted_time TEXT NOT NULL,
     title TEXT,
     content TEXT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS video_topics (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     video_id UUID NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
-    timestamp_seconds INT NOT NULL,
+    timestamp_seconds INT NOT NULL CHECK (timestamp_seconds >= 0),
     formatted_time TEXT NOT NULL,
     title TEXT NOT NULL,
-    page_number INT,
+    page_number INT CHECK (page_number IS NULL OR page_number >= 1),
     summary TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS video_transcripts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     video_id UUID NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
-    timestamp_seconds INT NOT NULL,
+    timestamp_seconds INT NOT NULL CHECK (timestamp_seconds >= 0),
     formatted_time TEXT NOT NULL,
     text TEXT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Relational hierarchy indexes
+-- Indexes for high-frequency video queries
 CREATE INDEX IF NOT EXISTS idx_chapters_book_id ON chapters(book_id);
 CREATE INDEX IF NOT EXISTS idx_chapters_book_number ON chapters(book_id, number);
 CREATE INDEX IF NOT EXISTS idx_sections_chapter_id ON sections(chapter_id);
@@ -187,9 +199,9 @@ CREATE TABLE IF NOT EXISTS conversations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     book_id UUID REFERENCES books(id) ON DELETE CASCADE,
-    title TEXT DEFAULT 'Academic Tutor Session',
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    title TEXT NOT NULL DEFAULT 'Academic Tutor Session',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -199,22 +211,22 @@ CREATE TABLE IF NOT EXISTS messages (
     content TEXT NOT NULL,
     learning_mode TEXT DEFAULT 'explain',
     context_snapshot JSONB,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS message_citations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     chunk_id UUID REFERENCES book_chunks(id) ON DELETE SET NULL,
-    source_type TEXT DEFAULT 'textbook',
+    source_type TEXT NOT NULL DEFAULT 'textbook',
     book_title TEXT NOT NULL,
     chapter_title TEXT,
     section_title TEXT,
-    page_number INT NOT NULL,
+    page_number INT NOT NULL CHECK (page_number >= 1),
     video_timestamp_seconds INT,
     video_formatted_time TEXT,
     excerpt TEXT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_conversations_user_book ON conversations(user_id, book_id);
@@ -223,30 +235,30 @@ CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages(conversation_id
 CREATE INDEX IF NOT EXISTS idx_message_citations_msg ON message_citations(message_id);
 
 -- ------------------------------------------------------------------------------
--- ANNOTATIONS: HIGHLIGHTS & BOOKMARKS
+-- ANNOTATIONS: HIGHLIGHTS, BOOKMARKS & NOTES
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS highlights (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     book_id UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-    page_number INT NOT NULL,
+    page_number INT NOT NULL CHECK (page_number >= 1),
     text TEXT NOT NULL,
-    color TEXT DEFAULT 'yellow' CHECK (color IN ('yellow', 'blue', 'green', 'pink')),
+    color TEXT NOT NULL DEFAULT 'yellow' CHECK (color IN ('yellow', 'blue', 'green', 'pink')),
     note TEXT,
     bounding_rect JSONB,
     rects JSONB,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS bookmarks (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     book_id UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-    page_number INT NOT NULL,
+    page_number INT NOT NULL CHECK (page_number >= 1),
     title TEXT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT unique_user_bookmark UNIQUE(user_id, book_id, page_number)
 );
 
@@ -254,14 +266,13 @@ CREATE TABLE IF NOT EXISTS notes (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     book_id UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-    page_number INT NOT NULL,
+    page_number INT NOT NULL CHECK (page_number >= 1),
     selected_text TEXT,
     content TEXT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Annotation relational and composite indexes
 CREATE INDEX IF NOT EXISTS idx_highlights_user_book ON highlights(user_id, book_id);
 CREATE INDEX IF NOT EXISTS idx_highlights_book_page ON highlights(book_id, page_number);
 CREATE INDEX IF NOT EXISTS idx_bookmarks_user_book ON bookmarks(user_id, book_id);
@@ -276,17 +287,16 @@ CREATE TABLE IF NOT EXISTS flashcards (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     book_id UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-    page_number INT NOT NULL,
+    page_number INT NOT NULL CHECK (page_number >= 1),
     concept TEXT NOT NULL,
     question TEXT NOT NULL,
     answer TEXT NOT NULL,
-    status TEXT DEFAULT 'unseen' CHECK (status IN ('unseen', 'learning', 'mastered')),
+    status TEXT NOT NULL DEFAULT 'unseen' CHECK (status IN ('unseen', 'learning', 'mastered')),
     last_reviewed TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Flashcard relational and status indexes
 CREATE INDEX IF NOT EXISTS idx_flashcards_user_book ON flashcards(user_id, book_id);
 CREATE INDEX IF NOT EXISTS idx_flashcards_book_page ON flashcards(book_id, page_number);
 CREATE INDEX IF NOT EXISTS idx_flashcards_user_status ON flashcards(user_id, status);
@@ -299,21 +309,21 @@ CREATE TABLE IF NOT EXISTS quizzes (
     user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     book_id UUID REFERENCES books(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
-    total_questions INT DEFAULT 3,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    total_questions INT NOT NULL DEFAULT 3 CHECK (total_questions >= 1),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS quiz_questions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     quiz_id UUID NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
     book_id UUID NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-    page_number INT NOT NULL,
+    page_number INT NOT NULL CHECK (page_number >= 1),
     concept TEXT NOT NULL,
     question TEXT NOT NULL,
     options JSONB NOT NULL, -- Array of { id, text, isCorrect }
     explanation TEXT NOT NULL,
-    difficulty TEXT DEFAULT 'medium' CHECK (difficulty IN ('easy', 'medium', 'hard')),
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    difficulty TEXT NOT NULL DEFAULT 'medium' CHECK (difficulty IN ('easy', 'medium', 'hard')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS quiz_attempts (
@@ -321,15 +331,14 @@ CREATE TABLE IF NOT EXISTS quiz_attempts (
     user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     book_id UUID REFERENCES books(id) ON DELETE CASCADE,
     quiz_id UUID NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
-    score INT NOT NULL,
-    total_questions INT NOT NULL,
-    answers JSONB, -- Array of { questionId, selectedOptionId, isCorrect }
-    started_at TIMESTAMPTZ DEFAULT NOW(),
-    completed_at TIMESTAMPTZ DEFAULT NOW(),
-    time_spent INT DEFAULT 0
+    score INT NOT NULL CHECK (score >= 0),
+    total_questions INT NOT NULL CHECK (total_questions >= 1),
+    answers JSONB,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    time_spent INT NOT NULL DEFAULT 0 CHECK (time_spent >= 0)
 );
 
--- Quiz relational and attempt indexes
 CREATE INDEX IF NOT EXISTS idx_quizzes_user_book ON quizzes(user_id, book_id);
 CREATE INDEX IF NOT EXISTS idx_quiz_questions_quiz_id ON quiz_questions(quiz_id);
 CREATE INDEX IF NOT EXISTS idx_quiz_attempts_user_quiz ON quiz_attempts(user_id, quiz_id);
@@ -348,13 +357,13 @@ CREATE TABLE IF NOT EXISTS student_concepts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     concept_id UUID NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
-    mastery_percentage INT DEFAULT 50 CHECK (mastery_percentage BETWEEN 0 AND 100),
-    questions_attempted INT DEFAULT 0,
-    questions_correct INT DEFAULT 0,
-    is_weak BOOLEAN DEFAULT FALSE,
+    mastery_percentage INT NOT NULL DEFAULT 50 CHECK (mastery_percentage BETWEEN 0 AND 100),
+    questions_attempted INT NOT NULL DEFAULT 0 CHECK (questions_attempted >= 0),
+    questions_correct INT NOT NULL DEFAULT 0 CHECK (questions_correct >= 0),
+    is_weak BOOLEAN NOT NULL DEFAULT FALSE,
     recommended_chapter TEXT,
-    recommended_page INT,
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    recommended_page INT CHECK (recommended_page IS NULL OR recommended_page >= 1),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT unique_user_concept UNIQUE(user_id, concept_id)
 );
 
@@ -365,18 +374,18 @@ CREATE TABLE IF NOT EXISTS study_sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     book_id UUID REFERENCES books(id) ON DELETE CASCADE,
-    started_at TIMESTAMPTZ DEFAULT NOW(),
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     ended_at TIMESTAMPTZ,
-    duration_minutes INT DEFAULT 0,
-    duration_seconds INT DEFAULT 0,
-    pages_read INT DEFAULT 0,
-    pages_viewed INT[] DEFAULT '{}',
-    pages_completed INT[] DEFAULT '{}',
-    video_time_seconds INT DEFAULT 0,
-    questions_asked INT DEFAULT 0,
-    activity_type TEXT DEFAULT 'reading',
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    duration_minutes INT NOT NULL DEFAULT 0 CHECK (duration_minutes >= 0),
+    duration_seconds INT NOT NULL DEFAULT 0 CHECK (duration_seconds >= 0),
+    pages_read INT NOT NULL DEFAULT 0 CHECK (pages_read >= 0),
+    pages_viewed INT[] NOT NULL DEFAULT '{}',
+    pages_completed INT[] NOT NULL DEFAULT '{}',
+    video_time_seconds INT NOT NULL DEFAULT 0 CHECK (video_time_seconds >= 0),
+    questions_asked INT NOT NULL DEFAULT 0 CHECK (questions_asked >= 0),
+    activity_type TEXT NOT NULL DEFAULT 'reading',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS study_events (
@@ -398,25 +407,24 @@ CREATE TABLE IF NOT EXISTS study_events (
         'quiz_completed',
         'flashcard_reviewed'
     )),
-    page_number INT,
-    duration_seconds INT DEFAULT 0,
-    metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    page_number INT CHECK (page_number IS NULL OR page_number >= 1),
+    duration_seconds INT NOT NULL DEFAULT 0 CHECK (duration_seconds >= 0),
+    metadata JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS student_progress (
     user_id UUID PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
-    total_study_minutes INT DEFAULT 0,
-    streak_days INT DEFAULT 1,
-    chapters_completed INT DEFAULT 0,
-    videos_watched INT DEFAULT 0,
-    quizzes_completed INT DEFAULT 0,
-    questions_asked INT DEFAULT 0,
-    active_subject TEXT DEFAULT 'Computer Science',
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    total_study_minutes INT NOT NULL DEFAULT 0 CHECK (total_study_minutes >= 0),
+    streak_days INT NOT NULL DEFAULT 1 CHECK (streak_days >= 0),
+    chapters_completed INT NOT NULL DEFAULT 0 CHECK (chapters_completed >= 0),
+    videos_watched INT NOT NULL DEFAULT 0 CHECK (videos_watched >= 0),
+    quizzes_completed INT NOT NULL DEFAULT 0 CHECK (quizzes_completed >= 0),
+    questions_asked INT NOT NULL DEFAULT 0 CHECK (questions_asked >= 0),
+    active_subject TEXT NOT NULL DEFAULT 'Computer Science',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Analytics & Session relational indexes
 CREATE INDEX IF NOT EXISTS idx_study_events_user_book ON study_events(user_id, book_id);
 CREATE INDEX IF NOT EXISTS idx_study_events_user_type ON study_events(user_id, event_type);
 CREATE INDEX IF NOT EXISTS idx_study_events_created ON study_events(created_at DESC);
@@ -513,29 +521,31 @@ ALTER TABLE flashcards ENABLE ROW LEVEL SECURITY;
 ALTER TABLE quizzes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE quiz_questions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE quiz_attempts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE concepts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE student_concepts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE study_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE study_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE student_progress ENABLE ROW LEVEL SECURITY;
 
--- Profiles: users can read/update their own profile
+-- 1. Profiles
 CREATE POLICY "Users can access own profile" ON profiles
     FOR ALL TO authenticated
     USING (auth.uid() = id)
     WITH CHECK (auth.uid() = id);
 
--- Books: users only access and create books they own
+-- 2. Books
 CREATE POLICY "Users can access own books" ON books
     FOR ALL TO authenticated
     USING (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);
 
--- Chapters & Sections: accessible if user owns the book
+-- 3. Chapters
 CREATE POLICY "Users can access chapters of own books" ON chapters
     FOR ALL TO authenticated
     USING (EXISTS (SELECT 1 FROM books WHERE books.id = chapters.book_id AND books.user_id = auth.uid()))
     WITH CHECK (EXISTS (SELECT 1 FROM books WHERE books.id = chapters.book_id AND books.user_id = auth.uid()));
 
+-- 4. Sections
 CREATE POLICY "Users can access sections of own books" ON sections
     FOR ALL TO authenticated
     USING (EXISTS (
@@ -549,23 +559,25 @@ CREATE POLICY "Users can access sections of own books" ON sections
         WHERE chapters.id = sections.chapter_id AND books.user_id = auth.uid()
     ));
 
--- Book Pages & Chunks: accessible if user owns the book
+-- 5. Book Pages
 CREATE POLICY "Users can access pages of own books" ON book_pages
     FOR ALL TO authenticated
     USING (EXISTS (SELECT 1 FROM books WHERE books.id = book_pages.book_id AND books.user_id = auth.uid()))
     WITH CHECK (EXISTS (SELECT 1 FROM books WHERE books.id = book_pages.book_id AND books.user_id = auth.uid()));
 
+-- 6. Book Chunks
 CREATE POLICY "Users can access chunks of own books" ON book_chunks
     FOR ALL TO authenticated
     USING (EXISTS (SELECT 1 FROM books WHERE books.id = book_chunks.book_id AND books.user_id = auth.uid()))
     WITH CHECK (EXISTS (SELECT 1 FROM books WHERE books.id = book_chunks.book_id AND books.user_id = auth.uid()));
 
--- Videos: accessible if user owns video
+-- 7. Videos
 CREATE POLICY "Users can access own videos" ON videos
     FOR ALL TO authenticated
     USING (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);
 
+-- 8. Video Segments, Topics, Transcripts
 CREATE POLICY "Users can access segments of own videos" ON video_segments
     FOR ALL TO authenticated
     USING (EXISTS (SELECT 1 FROM videos WHERE videos.id = video_segments.video_id AND videos.user_id = auth.uid()))
@@ -581,7 +593,7 @@ CREATE POLICY "Users can access transcripts of own videos" ON video_transcripts
     USING (EXISTS (SELECT 1 FROM videos WHERE videos.id = video_transcripts.video_id AND videos.user_id = auth.uid()))
     WITH CHECK (EXISTS (SELECT 1 FROM videos WHERE videos.id = video_transcripts.video_id AND videos.user_id = auth.uid()));
 
--- Conversations & Messages
+-- 9. Conversations & Messages
 CREATE POLICY "Users can access own conversations" ON conversations
     FOR ALL TO authenticated
     USING (auth.uid() = user_id)
@@ -605,7 +617,7 @@ CREATE POLICY "Users can access citations of own messages" ON message_citations
         WHERE messages.id = message_citations.message_id AND conversations.user_id = auth.uid()
     ));
 
--- Annotations: Highlights & Bookmarks
+-- 10. Annotations (Highlights, Bookmarks, Notes)
 CREATE POLICY "Users can access own highlights" ON highlights
     FOR ALL TO authenticated
     USING (auth.uid() = user_id)
@@ -621,13 +633,13 @@ CREATE POLICY "Users can access own notes" ON notes
     USING (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);
 
--- Flashcards
+-- 11. Flashcards
 CREATE POLICY "Users can access own flashcards" ON flashcards
     FOR ALL TO authenticated
     USING (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);
 
--- Quizzes & Attempts
+-- 12. Quizzes, Questions & Attempts
 CREATE POLICY "Users can access own quizzes" ON quizzes
     FOR ALL TO authenticated
     USING (auth.uid() = user_id)
@@ -643,12 +655,17 @@ CREATE POLICY "Users can access own quiz attempts" ON quiz_attempts
     USING (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);
 
--- Concept Mastery & Progress
+-- 13. Concepts & Mastery Radar
+CREATE POLICY "Authenticated users can read concepts catalog" ON concepts
+    FOR SELECT TO authenticated
+    USING (true);
+
 CREATE POLICY "Users can access own concept mastery" ON student_concepts
     FOR ALL TO authenticated
     USING (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);
 
+-- 14. Study Sessions, Events & Progress
 CREATE POLICY "Users can access own study sessions" ON study_sessions
     FOR ALL TO authenticated
     USING (auth.uid() = user_id)
@@ -667,7 +684,6 @@ CREATE POLICY "Users can access own progress" ON student_progress
 -- ------------------------------------------------------------------------------
 -- STORAGE BUCKET RLS: textbooks (Private Per-User Storage)
 -- ------------------------------------------------------------------------------
--- Ensure private isolation inside storage bucket: textbooks/{auth.uid()}/*
 DO $$ BEGIN
     INSERT INTO storage.buckets (id, name, public) 
     VALUES ('textbooks', 'textbooks', false)

@@ -331,13 +331,15 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = React.memo(({
 
               try {
                 const parsed = JSON.parse(dataStr);
-                if (parsed.text) {
-                  fullContent += parsed.text;
+                if (parsed.fullText) {
+                  fullContent = parsed.fullText;
+                } else if (parsed.text) {
+                  fullContent = parsed.text;
                 }
-                if (parsed.citations) {
+                if (Array.isArray(parsed.citations)) {
                   accumulatedCitations = parsed.citations;
                 }
-                if (parsed.suggestedFollowUps) {
+                if (Array.isArray(parsed.suggestedFollowUps)) {
                   followUps = parsed.suggestedFollowUps;
                 }
                 if (parsed.conversationId && !activeConversationId) {
@@ -371,8 +373,15 @@ export const AITutorPanel: React.FC<AITutorPanelProps> = React.memo(({
         }
       }
 
-      if (conversationIdAssigned) {
-        loadConversations(conversationIdAssigned);
+      if (book?.id) {
+        fetch(`/api/conversations?bookId=${encodeURIComponent(book.id)}`)
+          .then((res) => res.json())
+          .then((data) => {
+            if (data.success && Array.isArray(data.conversations)) {
+              setConversations(data.conversations);
+            }
+          })
+          .catch(() => {});
       }
     } catch (err: any) {
       console.error("Chat error:", err);

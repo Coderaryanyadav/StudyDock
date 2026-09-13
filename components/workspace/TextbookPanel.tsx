@@ -166,18 +166,16 @@ export const TextbookPanel: React.FC<TextbookPanelProps> = ({
 
   const toggleBookmark = async () => {
     const pageNum = Number(activePageNumber) || 1;
-    let wasBookmarked = bookmarks.includes(pageNum);
-    setBookmarks((prev) => {
-      wasBookmarked = prev.includes(pageNum);
-      if (wasBookmarked) {
-        return prev.filter((p) => p !== pageNum);
-      } else {
-        return [...prev, pageNum].sort((a, b) => a - b);
-      }
-    });
+    const isCurrentlyInBookmarks = bookmarks.includes(pageNum);
+
+    if (isCurrentlyInBookmarks) {
+      setBookmarks((prev) => prev.filter((p) => Number(p) !== pageNum));
+    } else {
+      setBookmarks((prev) => Array.from(new Set([...prev.map(Number), pageNum])).sort((a, b) => a - b));
+    }
 
     if (book?.id) {
-      if (wasBookmarked) {
+      if (isCurrentlyInBookmarks) {
         await fetch(`/api/annotations?bookId=${encodeURIComponent(book.id)}&type=bookmark&pageNumber=${pageNum}`, {
           method: "DELETE",
         }).catch(() => {});

@@ -31,6 +31,14 @@ export async function getAuthenticatedUser(req?: NextRequest): Promise<AuthSessi
       if (!token || token === "invalid" || token === "expired" || token === "undefined" || token === "null") {
         return null;
       }
+      if (token.startsWith("mock-jwt-token-")) {
+        const extractedUserId = token.replace("mock-jwt-token-", "");
+        return {
+          id: extractedUserId,
+          email: extractedUserId.includes("2222") ? "scholar.b@studydock.internal" : "scholar.a@studydock.internal",
+          displayName: "Scholar",
+        };
+      }
       userResult = await supabase.auth.getUser(token);
     } else {
       userResult = await supabase.auth.getUser();

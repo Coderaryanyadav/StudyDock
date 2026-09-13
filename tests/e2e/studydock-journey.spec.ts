@@ -102,11 +102,7 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
         return;
       }
 
-      await route.fulfill({
-        status: 400,
-        contentType: "application/json",
-        json: { message: "No active session" },
-      });
+      await route.continue();
     });
   }
 
@@ -167,6 +163,16 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
 
     // Ensure auth modal is dismissed
     await expect(targetPage.getByTestId("auth-modal")).not.toBeVisible({ timeout: 5000 }).catch(() => {});
+
+    // Dismiss onboarding modal if triggered upon first login
+    try {
+      if (await onboardingModal.isVisible({ timeout: 2000 })) {
+        await onboardingClose.click();
+        await expect(onboardingModal).not.toBeVisible({ timeout: 5000 });
+      }
+    } catch {
+      // not visible
+    }
   }
 
   test("Phase 14 Complete Real User Study & Security Journey (Steps 1-44)", async ({ page, request, context }) => {

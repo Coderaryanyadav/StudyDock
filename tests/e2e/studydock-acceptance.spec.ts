@@ -100,11 +100,7 @@ test.describe.serial("StudyDock Definitive Acceptance Test Suite", () => {
         return;
       }
 
-      await route.fulfill({
-        status: 400,
-        contentType: "application/json",
-        json: { message: "No active session" },
-      });
+      await route.continue();
     });
   }
 
@@ -155,6 +151,15 @@ test.describe.serial("StudyDock Definitive Acceptance Test Suite", () => {
     }
 
     await expect(page.getByTestId("auth-modal")).not.toBeVisible({ timeout: 5000 }).catch(() => {});
+
+    try {
+      if (await onboardingModal.isVisible({ timeout: 2000 })) {
+        await onboardingClose.click();
+        await expect(onboardingModal).not.toBeVisible({ timeout: 5000 });
+      }
+    } catch {
+      // not visible
+    }
   }
 
   test("User A Journey (Steps 1-39)", async ({ page }) => {

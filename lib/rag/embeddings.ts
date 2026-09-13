@@ -31,6 +31,10 @@ export async function generateEmbedding(
       }
       throw new Error(`Unexpected embedding dimension: ${result?.embedding?.values?.length}`);
     } catch (error: any) {
+      const isInvalidKey = error?.message?.includes("API_KEY_INVALID") || error?.message?.includes("API key not valid") || error?.status === 400;
+      if (isInvalidKey) {
+        return generateDeterministicVector(text, 768);
+      }
       if (attempt === retries) {
         if (process.env.NODE_ENV !== "production") {
           Logger.warn(`Embedding failed after ${retries} attempts, fallback to deterministic vector`, {

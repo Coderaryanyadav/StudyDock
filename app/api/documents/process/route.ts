@@ -11,14 +11,13 @@ const formSchema = z.object({
   subject: z.string().max(255).optional(),
 });
 
-export const POST = async (req: Request) => {
-  return withApiHandler(
-    {
-      requireAuth: true,
-      rateLimit: RATE_LIMITS.UPLOAD,
-    },
-    async ({ userId, req: innerReq }) => {
-      const formData = await innerReq.formData();
+export const POST = withApiHandler(
+  {
+    requireAuth: true,
+    rateLimit: RATE_LIMITS.UPLOAD,
+  },
+  async ({ userId, req }) => {
+    const formData = await req.formData();
       const file = formData.get("file") as File | null;
       
       const rawTitle = formData.get("title") as string || "";

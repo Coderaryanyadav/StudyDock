@@ -460,7 +460,7 @@ export default function Home() {
   // 2. Unauthenticated State (STATE A) — Dedicated Professional Welcome / Login Screen
   if (authState === "unauthenticated") {
     return (
-      <div className="h-screen flex flex-col bg-slate-950 text-slate-100 antialiased overflow-hidden font-sans">
+      <div className="h-[100dvh] flex flex-col bg-slate-950 text-slate-100 antialiased overflow-hidden font-sans">
         <WorkspaceNavbar
           currentView="landing"
           onViewChange={() => {}}

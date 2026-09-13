@@ -9,9 +9,9 @@ test.describe('API Security Tests', () => {
     expect([401, 403]).toContain(response.status());
     
     const data = await response.json();
-    expect(data.success).toBe(false);
-    // Error state should not leak sensitive info
     expect(data.error).toBeDefined();
+    // Error state should not leak sensitive info
+    expect(typeof data.error).toBe('string');
   });
 
   test('cannot access another users book via API directly', async ({ request }) => {

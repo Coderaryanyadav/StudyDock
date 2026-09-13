@@ -90,6 +90,7 @@ export class Logger {
       timestamp: new Date().toISOString(),
       level,
       message,
+      data: redact(payload || {}),
       ...redact(payload || {}),
     };
 

@@ -5,7 +5,7 @@ import { withApiHandler, RATE_LIMITS } from "@/lib/api/with-handler";
 import { z } from "zod";
 
 const bookParamsSchema = z.object({
-  id: z.string().string().min(1, "Invalid book ID format"),
+  id: z.string().min(1, "Invalid book ID format"),
 });
 
 const searchQuerySchema = z.object({
@@ -24,7 +24,7 @@ export const GET = async (req: Request, { params }: { params: Promise<{ id: stri
     async ({ userId, query }) => {
       const parseResult = bookParamsSchema.safeParse(resolvedParams);
       if (!parseResult.success) {
-        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.errors }, { status: 400 });
+        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.issues }, { status: 400 });
       }
       const bookId = parseResult.data.id;
 

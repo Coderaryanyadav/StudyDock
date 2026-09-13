@@ -102,7 +102,11 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
         return;
       }
 
-      await route.continue();
+      await route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        json: { message: "No active session" },
+      });
     });
   }
 
@@ -136,8 +140,12 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
       }
       const signInBtn = targetPage.getByTestId("nav-sign-in-btn");
       await expect(signInBtn).toBeVisible({ timeout: 10000 });
-      await signInBtn.click();
-      await expect(targetPage.getByTestId("auth-modal")).toBeVisible({ timeout: 10000 });
+      await expect(async () => {
+        if (!(await targetPage.getByTestId("auth-modal").isVisible())) {
+          await signInBtn.click();
+        }
+        await expect(targetPage.getByTestId("auth-modal")).toBeVisible({ timeout: 2000 });
+      }).toPass({ timeout: 15000, intervals: [500, 1000] });
     }
 
     await targetPage.getByTestId("auth-tab-signup").click();
@@ -168,6 +176,9 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
     console.log("➡️ STEP 1: Create & Login User A");
     page.on("console", (msg) => console.log("BROWSER LOG:", msg.type(), msg.text()));
     page.on("pageerror", (err) => console.log("BROWSER ERROR:", err.message, "\nSTACK:", err.stack));
+    page.on("response", (res) => {
+      if (res.status() >= 400) console.log("RESPONSE ERROR:", res.status(), res.url());
+    });
     await setupAuthRoutes(page);
     await page.goto("/");
     await page.waitForLoadState("domcontentloaded");

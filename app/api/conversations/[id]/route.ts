@@ -11,20 +11,20 @@ import { z } from "zod";
 export const runtime = "nodejs";
 
 const conversationParamsSchema = z.object({
-  id: z.string().string().min(1, "Invalid conversation ID format"),
+  id: z.string().min(1, "Invalid conversation ID format"),
 });
 
 const getConversationQuerySchema = z.object({
-  bookId: z.string().string().min(1, "Invalid book ID format").optional(),
+  bookId: z.string().min(1, "Invalid book ID format").optional(),
 });
 
 const patchConversationSchema = z.object({
   title: z.string().min(1).max(255),
-  bookId: z.string().string().min(1, "Invalid book ID format").optional(),
+  bookId: z.string().min(1, "Invalid book ID format").optional(),
 });
 
 const deleteConversationQuerySchema = z.object({
-  bookId: z.string().string().min(1, "Invalid book ID format").optional(),
+  bookId: z.string().min(1, "Invalid book ID format").optional(),
 });
 
 export const GET = async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
@@ -39,7 +39,7 @@ export const GET = async (req: Request, { params }: { params: Promise<{ id: stri
     async ({ userId, query }) => {
       const parseResult = conversationParamsSchema.safeParse(resolvedParams);
       if (!parseResult.success) {
-        return NextResponse.json({ error: "Invalid conversation ID", details: parseResult.error.errors }, { status: 400 });
+        return NextResponse.json({ error: "Invalid conversation ID", details: parseResult.error.issues }, { status: 400 });
       }
       const conversationId = parseResult.data.id;
 
@@ -85,7 +85,7 @@ export const PATCH = async (req: Request, { params }: { params: Promise<{ id: st
     async ({ userId, body }) => {
       const parseResult = conversationParamsSchema.safeParse(resolvedParams);
       if (!parseResult.success) {
-        return NextResponse.json({ error: "Invalid conversation ID", details: parseResult.error.errors }, { status: 400 });
+        return NextResponse.json({ error: "Invalid conversation ID", details: parseResult.error.issues }, { status: 400 });
       }
       const conversationId = parseResult.data.id;
 
@@ -124,7 +124,7 @@ export const DELETE = async (req: Request, { params }: { params: Promise<{ id: s
     async ({ userId, query }) => {
       const parseResult = conversationParamsSchema.safeParse(resolvedParams);
       if (!parseResult.success) {
-        return NextResponse.json({ error: "Invalid conversation ID", details: parseResult.error.errors }, { status: 400 });
+        return NextResponse.json({ error: "Invalid conversation ID", details: parseResult.error.issues }, { status: 400 });
       }
       const conversationId = parseResult.data.id;
 

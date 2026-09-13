@@ -77,7 +77,7 @@ export async function rateLimit(context: RateLimitContext): Promise<RateLimitRes
 
 // Preset configurations
 export const RATE_LIMITS = {
-  STANDARD: { limit: 120, windowMs: 60 * 1000 }, // 120 req / min (more generous for standard)
-  AI_GENERATION: { limit: 10, windowMs: 60 * 1000 }, // 10 req / min
-  UPLOAD: { limit: 20, windowMs: 60 * 1000 }, // 20 req / min
+  STANDARD: { limit: 1000, windowMs: 60 * 1000 }, // 1000 req / min
+  AI_GENERATION: { limit: 120, windowMs: 60 * 1000 }, // 120 req / min
+  UPLOAD: { limit: 100, windowMs: 60 * 1000 }, // 100 req / min
 };

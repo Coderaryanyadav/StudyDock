@@ -27,7 +27,7 @@ export const POST = async (req: Request) => {
 
       const parseResult = formSchema.safeParse({ title: rawTitle, author: rawAuthor, subject: rawSubject });
       if (!parseResult.success) {
-        return NextResponse.json({ error: "Invalid form data", details: parseResult.error.errors }, { status: 400 });
+        return NextResponse.json({ error: "Invalid form data", details: parseResult.error.issues }, { status: 400 });
       }
       
       const { title, author, subject } = parseResult.data;

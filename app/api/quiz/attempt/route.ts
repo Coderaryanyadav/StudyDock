@@ -8,8 +8,8 @@ import { z } from "zod";
 export const runtime = "nodejs";
 
 const quizAttemptSchema = z.object({
-  quizId: z.string().string().min(1, "Invalid quiz ID format"),
-  bookId: z.string().string().min(1, "Invalid book ID format").optional(),
+  quizId: z.string().min(1, "Invalid quiz ID format"),
+  bookId: z.string().min(1, "Invalid book ID format").optional(),
   answers: z.array(z.object({
     questionId: z.string(),
     selectedOptionId: z.string(),
@@ -19,7 +19,7 @@ const quizAttemptSchema = z.object({
   timeSpentSeconds: z.number().min(0).max(36000), // Max 10 hours for a quiz
   concept: z.string().max(255).optional(),
   chapterTitle: z.string().max(255).optional(),
-  pageNumber: z.union([z.number(), z.string()]).refine((val) => !isNaN(Number(val)), { message: "Valid page number is required" }),
+  pageNumber: z.union([z.number(), z.string()]).refine((val) => !isNaN(Number(val)), { message: "Valid page number is required" }).optional(),
 });
 
 export const POST = withApiHandler(
@@ -65,7 +65,7 @@ export const POST = withApiHandler(
       timeSpentSeconds,
       concept,
       chapterTitle,
-      pageNumber: Number(pageNumber),
+      pageNumber: pageNumber !== undefined ? Number(pageNumber) : undefined,
     });
 
     if (!result) {

@@ -34,7 +34,7 @@ export function withApiHandler<TBody = any, TQuery = any>(
     });
 
     try {
-      const ip = req.headers.get("x-forwarded-for") || req.ip || "unknown";
+      const ip = req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "127.0.0.1";
 
       // 1. Authentication
       if (options.requireAuth) {
@@ -85,7 +85,7 @@ export function withApiHandler<TBody = any, TQuery = any>(
         } catch (error) {
           if (error instanceof z.ZodError) {
             return NextResponse.json(
-              { error: "Invalid query parameters.", details: error.errors },
+              { error: "Invalid query parameters.", details: error.issues },
               { status: 400 }
             );
           }
@@ -101,7 +101,7 @@ export function withApiHandler<TBody = any, TQuery = any>(
         } catch (error) {
           if (error instanceof z.ZodError) {
             return NextResponse.json(
-              { error: "Invalid request payload.", details: error.errors },
+              { error: "Invalid request payload.", details: error.issues },
               { status: 400 }
             );
           }

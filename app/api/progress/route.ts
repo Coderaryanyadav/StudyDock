@@ -8,7 +8,7 @@ import { z } from "zod";
 export const runtime = "nodejs";
 
 const progressPostSchema = z.object({
-  bookId: z.string().string().min(1, "Invalid book ID format").optional().nullable(),
+  bookId: z.string().min(1, "Invalid book ID format").optional().nullable(),
   durationSeconds: z.number().optional(),
   pagesRead: z.number().optional(),
   videoSeconds: z.number().optional(),

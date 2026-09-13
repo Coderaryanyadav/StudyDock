@@ -109,7 +109,7 @@ export async function saveHighlight(
     bookId: string;
     pageNumber: number;
     text: string;
-    color?: "yellow" | "blue" | "green" | "pink";
+    color?: Highlight["color"];
     note?: string;
     boundingRect?: HighlightRect | null;
     rects?: HighlightRect[];
@@ -118,7 +118,7 @@ export async function saveHighlight(
   const supabase = await createServerSupabaseClient();
   if (!supabase || !userId || !data.bookId || !data.text) return null;
 
-  const validColors = ["yellow", "blue", "green", "pink"];
+  const validColors: Highlight["color"][] = ["yellow", "blue", "green", "pink", "rose", "purple", "orange"];
   const color = data.color && validColors.includes(data.color) ? data.color : "yellow";
   const sanitizedText = sanitizeText(data.text, 4000);
   if (!sanitizedText) return null;
@@ -173,14 +173,14 @@ export async function updateHighlight(
   userId: string,
   highlightId: string,
   updates: {
-    color?: "yellow" | "blue" | "green" | "pink";
+    color?: Highlight["color"];
     note?: string;
   }
 ): Promise<Highlight | null> {
   const supabase = await createServerSupabaseClient();
   if (!supabase || !userId || !highlightId) return null;
 
-  const validColors = ["yellow", "blue", "green", "pink"];
+  const validColors: Highlight["color"][] = ["yellow", "blue", "green", "pink", "rose", "purple", "orange"];
   const patch: Record<string, any> = {
     updated_at: new Date().toISOString(),
   };

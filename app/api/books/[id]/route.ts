@@ -6,7 +6,7 @@ import { withApiHandler, RATE_LIMITS } from "@/lib/api/with-handler";
 import { z } from "zod";
 
 const bookParamsSchema = z.object({
-  id: z.string().string().min(1, "Invalid book ID format"),
+  id: z.string().min(1, "Invalid book ID format"),
 });
 
 const patchBookSchema = z.object({
@@ -26,7 +26,7 @@ export const GET = async (req: Request, { params }: { params: Promise<{ id: stri
       // Manual UUID parsing for route params since withApiHandler doesn't handle Next params directly
       const parseResult = bookParamsSchema.safeParse(resolvedParams);
       if (!parseResult.success) {
-        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.errors }, { status: 400 });
+        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.issues }, { status: 400 });
       }
       const bookId = parseResult.data.id;
 
@@ -134,7 +134,7 @@ export const PATCH = async (req: Request, { params }: { params: Promise<{ id: st
     async ({ userId, body }) => {
       const parseResult = bookParamsSchema.safeParse(resolvedParams);
       if (!parseResult.success) {
-        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.errors }, { status: 400 });
+        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.issues }, { status: 400 });
       }
       const bookId = parseResult.data.id;
 
@@ -184,7 +184,7 @@ export const DELETE = async (req: Request, { params }: { params: Promise<{ id: s
     async ({ userId }) => {
       const parseResult = bookParamsSchema.safeParse(resolvedParams);
       if (!parseResult.success) {
-        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.errors }, { status: 400 });
+        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.issues }, { status: 400 });
       }
       const bookId = parseResult.data.id;
 

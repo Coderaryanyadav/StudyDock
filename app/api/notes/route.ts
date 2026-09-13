@@ -13,23 +13,23 @@ import { z } from "zod";
 export const runtime = "nodejs";
 
 const notesGetSchema = z.object({
-  bookId: z.string().string().min(1, "Invalid book ID format"),
+  bookId: z.string().min(1, "Invalid book ID format"),
 });
 
 const notesPostSchema = z.object({
-  bookId: z.string().string().min(1, "Invalid book ID format"),
+  bookId: z.string().min(1, "Invalid book ID format"),
   pageNumber: z.number().int().min(1).optional(),
   selectedText: z.string().max(10000).optional(),
   content: z.string().min(1).max(10000, "Note content exceeds maximum length"),
 });
 
 const notesPatchSchema = z.object({
-  id: z.string().string().min(1, "Invalid note ID format"),
+  id: z.string().min(1, "Invalid note ID format"),
   content: z.string().min(1).max(10000, "Note content exceeds maximum length"),
 });
 
 const notesDeleteSchema = z.object({
-  id: z.string().string().min(1, "Invalid note ID format"),
+  id: z.string().min(1, "Invalid note ID format"),
 });
 
 export const GET = withApiHandler(

@@ -9,7 +9,7 @@ import { withApiHandler, RATE_LIMITS } from "@/lib/api/with-handler";
 import { z } from "zod";
 
 const bookParamsSchema = z.object({
-  id: z.string().string().min(1, "Invalid book ID format"),
+  id: z.string().min(1, "Invalid book ID format"),
 });
 
 const videoPostSchema = z.object({
@@ -30,7 +30,7 @@ const videoPostSchema = z.object({
 });
 
 const videoDeleteSchema = z.object({
-  videoId: z.string().string().min(1).optional(),
+  videoId: z.string().min(1).optional(),
 });
 
 export const POST = async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
@@ -45,7 +45,7 @@ export const POST = async (req: Request, { params }: { params: Promise<{ id: str
     async ({ userId, body }) => {
       const parseResult = bookParamsSchema.safeParse(resolvedParams);
       if (!parseResult.success) {
-        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.errors }, { status: 400 });
+        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.issues }, { status: 400 });
       }
       const bookId = parseResult.data.id;
 
@@ -80,7 +80,7 @@ export const GET = async (req: Request, { params }: { params: Promise<{ id: stri
     async ({ userId }) => {
       const parseResult = bookParamsSchema.safeParse(resolvedParams);
       if (!parseResult.success) {
-        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.errors }, { status: 400 });
+        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.issues }, { status: 400 });
       }
       const bookId = parseResult.data.id;
 
@@ -112,7 +112,7 @@ export const DELETE = async (req: Request, { params }: { params: Promise<{ id: s
     async ({ userId, query }) => {
       const parseResult = bookParamsSchema.safeParse(resolvedParams);
       if (!parseResult.success) {
-        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.errors }, { status: 400 });
+        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.issues }, { status: 400 });
       }
       const bookId = parseResult.data.id;
 

@@ -21,7 +21,7 @@ export const runtime = "nodejs";
 
 const chatPostSchema = z.object({
   action: z.enum(["create_conversation", "send_message"]).optional(),
-  bookId: z.string().string().min(1, "Invalid book ID"),
+  bookId: z.string().min(1, "Invalid book ID"),
   title: z.string().max(255).optional(), // For create_conversation
   question: z.string().max(2000).optional(),
   message: z.string().max(2000).optional(),
@@ -29,28 +29,28 @@ const chatPostSchema = z.object({
   selectedText: z.string().max(5000).optional(),
   learningMode: z.enum(["explain", "summarize", "quiz", "flashcards", "socratic", "analyze"]).optional(),
   videoTimestampSeconds: z.number().min(0).optional(),
-  conversationId: z.string().string().min(1).optional(),
+  conversationId: z.string().min(1).optional(),
 });
 
 const chatGetSchema = z.object({
-  bookId: z.string().string().min(1),
-  conversationId: z.string().string().min(1).optional(),
+  bookId: z.string().min(1),
+  conversationId: z.string().min(1).optional(),
   list: z.enum(["true", "false"]).optional(),
 });
 
 const chatPatchSchema = z.object({
-  conversationId: z.string().string().min(1),
+  conversationId: z.string().min(1),
   title: z.string().min(1).max(255),
 });
 
 const chatDeleteSchema = z.object({
-  conversationId: z.string().string().min(1),
+  conversationId: z.string().min(1),
 });
 
 export const POST = withApiHandler(
   {
     requireAuth: true,
-    rateLimit: RATE_LIMITS.AI_GENERATION, // 10 per minute
+    rateLimit: RATE_LIMITS.STANDARD,
     bodySchema: chatPostSchema,
   },
   async ({ userId, body }) => {

@@ -2,25 +2,25 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Book, StudentProgress, VideoLecture } from "@/types";
-import { BookOpen, Upload } from "lucide-react";
+import { BookOpen, Upload, Loader2, GraduationCap } from "lucide-react";
 import { WorkspaceNavbar } from "@/components/navbar/WorkspaceNavbar";
 import { WorkspaceLayout } from "@/components/workspace/WorkspaceLayout";
 import { StudyDashboard } from "@/components/dashboard/StudyDashboard";
 import { LandingPage } from "@/components/landing/LandingPage";
-import dynamic from "next/dynamic";
-
-const QuizModal = dynamic(() => import("@/components/modals/QuizModal").then(mod => mod.QuizModal));
-const FlashcardsModal = dynamic(() => import("@/components/modals/FlashcardsModal").then(mod => mod.FlashcardsModal));
-const ShortcutsModal = dynamic(() => import("@/components/modals/ShortcutsModal").then(mod => mod.ShortcutsModal));
-const DocumentUploadModal = dynamic(() => import("@/components/modals/DocumentUploadModal").then(mod => mod.DocumentUploadModal));
-const OnboardingModal = dynamic(() => import("@/components/modals/OnboardingModal").then(mod => mod.OnboardingModal));
-const CommandPaletteModal = dynamic(() => import("@/components/modals/CommandPaletteModal").then(mod => mod.CommandPaletteModal));
-const AuthModal = dynamic(() => import("@/components/auth/AuthModal").then(mod => mod.AuthModal));
-const LibraryModal = dynamic(() => import("@/components/library/LibraryModal").then(mod => mod.LibraryModal));
+import { UnauthenticatedLanding } from "@/components/auth/UnauthenticatedLanding";
+import { QuizModal } from "@/components/modals/QuizModal";
+import { FlashcardsModal } from "@/components/modals/FlashcardsModal";
+import { ShortcutsModal } from "@/components/modals/ShortcutsModal";
+import { DocumentUploadModal } from "@/components/modals/DocumentUploadModal";
+import { OnboardingModal } from "@/components/modals/OnboardingModal";
+import { CommandPaletteModal } from "@/components/modals/CommandPaletteModal";
+import { AuthModal } from "@/components/auth/AuthModal";
+import { LibraryModal } from "@/components/library/LibraryModal";
 import { safeLocalStorageGet, safeLocalStorageSet } from "@/lib/utils";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export default function Home() {
+  const [authState, setAuthState] = useState<"loading" | "authenticated" | "unauthenticated">("loading");
   const [currentView, setCurrentView] = useState<"workspace" | "dashboard" | "landing">("workspace");
   const [activeBook, setActiveBook] = useState<Book | null>(null);
   const [activePageNumber, setActivePageNumber] = useState<number>(1);
@@ -46,6 +46,7 @@ export default function Home() {
   const [isOnboardingModalOpen, setIsOnboardingModalOpen] = useState<boolean>(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [authModalInitialMode, setAuthModalInitialMode] = useState<"signin" | "signup">("signin");
 
   // Dynamic Quiz & Flashcards state
   const [activeQuizId, setActiveQuizId] = useState<string | null>(null);
@@ -55,98 +56,18 @@ export default function Home() {
   // Target citation page jump tracker
   const [targetCitationPage, setTargetCitationPage] = useState<number | null>(null);
 
-  // Load user books on auth
-  useEffect(() => {
-    const supabase = getSupabaseBrowserClient();
-    if (supabase) {
-      supabase.auth.getSession().then(({ data }) => {
-        if (data.session?.user) {
-          fetchUserBooksAndLoadLatest();
-          fetchUserProgress();
-        }
-      });
-
-      const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
-        if (session?.user) {
-          fetchUserBooksAndLoadLatest();
-          fetchUserProgress();
-        } else {
-          setActiveBook(null);
-          setActiveVideo(null);
-        }
-      });
-
-      return () => {
-        authListener.subscription.unsubscribe();
-      };
+  const fetchUserBooksAndLoadLatest = async () => {
+    try {
+      const res = await fetch("/api/books");
+      const data = await res.json();
+      if (res.ok && data.success && data.books?.length > 0) {
+        const latestBook = data.books[0];
+        handleSelectBook(latestBook.id);
+      }
+    } catch (err) {
+      console.warn("Auto-load book note:", err);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Active Study Session & Page Tracking (tracks real study time only when tab is visible)
-  useEffect(() => {
-    if (!activeBook?.id || currentView !== "workspace") return;
-
-    // 1. Log page_opened event when navigating to a page
-    fetch("/api/events", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        eventType: "page_opened",
-        bookId: activeBook.id,
-        pageNumber: activePageNumber,
-      }),
-    }).catch(() => {});
-
-    let secondsOnPage = 0;
-    const interval = setInterval(() => {
-      if (document.visibilityState === "visible") {
-        secondsOnPage += 15;
-        // Heartbeat every 60s
-        if (secondsOnPage >= 60) {
-          fetch("/api/progress", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              bookId: activeBook.id,
-              durationSeconds: secondsOnPage,
-              pageNumber: activePageNumber,
-            }),
-          }).catch(() => {});
-          secondsOnPage = 0;
-        }
-      }
-    }, 15000);
-
-    return () => {
-      clearInterval(interval);
-      if (secondsOnPage >= 15) {
-        // Record completed or page_time event on unmount/page change
-        fetch("/api/progress", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            bookId: activeBook.id,
-            durationSeconds: secondsOnPage,
-            pageNumber: activePageNumber,
-          }),
-        }).catch(() => {});
-
-        if (secondsOnPage >= 45) {
-          fetch("/api/events", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              eventType: "page_completed",
-              bookId: activeBook.id,
-              pageNumber: activePageNumber,
-              durationSeconds: secondsOnPage,
-            }),
-          }).catch(() => {});
-        }
-      }
-    };
-  }, [activeBook?.id, activePageNumber, currentView]);
+  };
 
   const fetchUserProgress = async () => {
     try {
@@ -177,29 +98,117 @@ export default function Home() {
     }
   };
 
+  // Real Supabase Session Lifecycle Listener
   useEffect(() => {
-    if (currentView === "dashboard") {
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      setAuthState("unauthenticated");
+      return;
+    }
+
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!error && data?.session?.user) {
+        setAuthState("authenticated");
+        fetchUserBooksAndLoadLatest();
+        fetchUserProgress();
+      } else {
+        setAuthState("unauthenticated");
+      }
+    }).catch(() => {
+      setAuthState("unauthenticated");
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        setAuthState("authenticated");
+        fetchUserBooksAndLoadLatest();
+        fetchUserProgress();
+      } else {
+        setAuthState("unauthenticated");
+        setActiveBook(null);
+        setActiveVideo(null);
+        setQuizQuestions([]);
+        setFlashcards([]);
+      }
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Active Study Session & Page Tracking (tracks real study time only when tab is visible)
+  useEffect(() => {
+    if (authState !== "authenticated" || !activeBook?.id || currentView !== "workspace") return;
+
+    fetch("/api/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        eventType: "page_opened",
+        bookId: activeBook.id,
+        pageNumber: activePageNumber,
+      }),
+    }).catch(() => {});
+
+    let secondsOnPage = 0;
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        secondsOnPage += 15;
+        if (secondsOnPage >= 60) {
+          fetch("/api/progress", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              bookId: activeBook.id,
+              durationSeconds: secondsOnPage,
+              pageNumber: activePageNumber,
+            }),
+          }).catch(() => {});
+          secondsOnPage = 0;
+        }
+      }
+    }, 15000);
+
+    return () => {
+      clearInterval(interval);
+      if (secondsOnPage >= 15) {
+        fetch("/api/progress", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bookId: activeBook.id,
+            durationSeconds: secondsOnPage,
+            pageNumber: activePageNumber,
+          }),
+        }).catch(() => {});
+
+        if (secondsOnPage >= 45) {
+          fetch("/api/events", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              eventType: "page_completed",
+              bookId: activeBook.id,
+              pageNumber: activePageNumber,
+              durationSeconds: secondsOnPage,
+            }),
+          }).catch(() => {});
+        }
+      }
+    };
+  }, [authState, activeBook?.id, activePageNumber, currentView]);
+
+  useEffect(() => {
+    if (authState === "authenticated" && currentView === "dashboard") {
       fetchUserProgress();
     }
-  }, [currentView]);
-
-  const fetchUserBooksAndLoadLatest = async () => {
-    try {
-      const res = await fetch("/api/books");
-      const data = await res.json();
-      if (res.ok && data.success && data.books?.length > 0) {
-        const latestBook = data.books[0];
-        handleSelectBook(latestBook.id);
-      }
-    } catch (err) {
-      console.warn("Auto-load book note:", err);
-    }
-  };
+  }, [authState, currentView]);
 
   const handleSelectBook = async (bookId: string) => {
     if (!bookId) return;
 
-    // Reset book-specific context when selecting another book
     setQuizQuestions([]);
     setFlashcards([]);
     setTargetCitationPage(null);
@@ -239,13 +248,15 @@ export default function Home() {
     }
   };
 
-  // Check first time user for onboarding
+  // Check first time user for onboarding (authenticated only)
   useEffect(() => {
-    const hasSeenOnboarding = safeLocalStorageGet("has_seen_onboarding", false);
-    if (!hasSeenOnboarding) {
-      setIsOnboardingModalOpen(true);
+    if (authState === "authenticated") {
+      const hasSeenOnboarding = safeLocalStorageGet("has_seen_onboarding", false);
+      if (!hasSeenOnboarding) {
+        setIsOnboardingModalOpen(true);
+      }
     }
-  }, []);
+  }, [authState]);
 
   const handlePageChange = useCallback((newPage: number) => {
     setActivePageNumber(newPage);
@@ -258,8 +269,10 @@ export default function Home() {
     }
   }, [activeBook?.id]);
 
-  // Global Keyboard Shortcuts
+  // Global Keyboard Shortcuts (authenticated only)
   useEffect(() => {
+    if (authState !== "authenticated") return;
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (
         document.activeElement?.tagName === "INPUT" ||
@@ -285,9 +298,18 @@ export default function Home() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeBook?.totalPages, activePageNumber, handlePageChange]);
+  }, [authState, activeBook?.totalPages, activePageNumber, handlePageChange]);
+
+  const handleOpenAuth = (mode: "signin" | "signup" = "signin") => {
+    setAuthModalInitialMode(mode);
+    setIsAuthModalOpen(true);
+  };
 
   const handleOpenQuizModal = async () => {
+    if (authState !== "authenticated") {
+      handleOpenAuth("signin");
+      return;
+    }
     setIsQuizModalOpen(true);
     if (activeBook && activeBook.id) {
       const activePageObj = activeBook.pages.find((p) => p.pageNumber === activePageNumber) || activeBook.pages[0];
@@ -322,6 +344,10 @@ export default function Home() {
   };
 
   const handleOpenFlashcardsModal = async () => {
+    if (authState !== "authenticated") {
+      handleOpenAuth("signin");
+      return;
+    }
     setIsFlashcardsModalOpen(true);
     if (activeBook && activeBook.id) {
       const activePageObj = activeBook.pages.find((p) => p.pageNumber === activePageNumber) || activeBook.pages[0];
@@ -406,6 +432,64 @@ export default function Home() {
     }
   };
 
+  // 1. Sleek Loading State while session is determining (prevents any auth flicker)
+  if (authState === "loading") {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#080c14] text-slate-100 antialiased font-sans">
+        <div className="flex flex-col items-center space-y-4 animate-in fade-in duration-200">
+          <div className="w-12 h-12 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-lg">
+            <GraduationCap className="w-7 h-7" />
+          </div>
+          <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+            <span>Initializing StudyDock session...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Unauthenticated State (STATE A) — Dedicated Professional Welcome / Login Screen
+  if (authState === "unauthenticated") {
+    return (
+      <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100 antialiased overflow-hidden font-sans">
+        <WorkspaceNavbar
+          currentView="landing"
+          onViewChange={() => {}}
+          activeBook={null}
+          activePageNumber={1}
+          onOpenLibraryModal={() => handleOpenAuth("signin")}
+          onOpenUploadModal={() => handleOpenAuth("signin")}
+          onOpenShortcutsModal={() => {}}
+          onOpenQuizModal={() => handleOpenAuth("signin")}
+          onOpenFlashcardsModal={() => handleOpenAuth("signin")}
+          onOpenCommandPalette={() => handleOpenAuth("signin")}
+          onOpenAuthModal={(mode) => handleOpenAuth(mode || "signin")}
+          isAuthenticated={false}
+        />
+
+        <main className="flex-1 flex flex-col overflow-hidden relative">
+          <UnauthenticatedLanding
+            onOpenSignIn={() => handleOpenAuth("signin")}
+            onOpenSignUp={() => handleOpenAuth("signup")}
+          />
+        </main>
+
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
+          initialMode={authModalInitialMode}
+          onAuthSuccess={() => {
+            setAuthState("authenticated");
+            fetchUserBooksAndLoadLatest();
+            fetchUserProgress();
+          }}
+        />
+      </div>
+    );
+  }
+
+  // 3. Authenticated State (STATE B) — Normal Existing StudyDock Application
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100 antialiased overflow-hidden font-sans">
       {/* Top Navigation */}
@@ -420,8 +504,8 @@ export default function Home() {
         onOpenQuizModal={handleOpenQuizModal}
         onOpenFlashcardsModal={handleOpenFlashcardsModal}
         onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
-        onOpenAuthModal={() => setIsAuthModalOpen(true)}
-        onResetDemo={() => {}}
+        onOpenAuthModal={(mode) => handleOpenAuth(mode || "signin")}
+        isAuthenticated={true}
       />
 
       {/* Main View Container */}
@@ -520,6 +604,7 @@ export default function Home() {
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
+        initialMode={authModalInitialMode}
         onAuthSuccess={() => {
           fetchUserBooksAndLoadLatest();
           fetchUserProgress();

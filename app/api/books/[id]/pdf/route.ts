@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { verifyBookOwnership } from "@/lib/supabase/auth";
+import { authenticateRequest, verifyBookOwnership } from "@/lib/supabase/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { withApiHandler, RATE_LIMITS } from "@/lib/api/with-handler";
 import { z } from "zod";
@@ -7,7 +7,7 @@ import { z } from "zod";
 export const runtime = "nodejs";
 
 const bookParamsSchema = z.object({
-  id: z.string().string().min(1, "Invalid book ID format"),
+  id: z.string().min(1, "Invalid book ID format"),
 });
 
 const pdfQuerySchema = z.object({
@@ -23,14 +23,22 @@ export const GET = async (req: Request, { params }: { params: Promise<{ id: stri
       rateLimit: RATE_LIMITS.STANDARD,
       querySchema: pdfQuerySchema,
     },
-    async ({ userId, query }) => {
+    async ({ req, userId, query }) => {
+      const auth = await authenticateRequest(req);
+      if (!userId || !auth?.id) {
+        return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+      }
+      if (!userId) {
+        return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+      }
+
       const parseResult = bookParamsSchema.safeParse(resolvedParams);
       if (!parseResult.success) {
-        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.errors }, { status: 400 });
+        return NextResponse.json({ error: "Invalid book ID", details: parseResult.error.issues }, { status: 400 });
       }
       const bookId = parseResult.data.id;
 
-      const isOwner = await verifyBookOwnership(userId!, bookId);
+      const isOwner = await verifyBookOwnership(userId, bookId);
       if (!isOwner) {
         return NextResponse.json({ error: "Access denied. You do not own this book." }, { status: 403 });
       }

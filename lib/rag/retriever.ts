@@ -150,7 +150,7 @@ export async function retrieveRelevantContext(
     // Authenticated vector search with threshold
     const { data, error } = await supabase.rpc("match_book_chunks", {
       query_embedding: queryEmbedding,
-      match_threshold: 0.35,
+      match_threshold: 0.20,
       match_count: 10,
       filter_book_id: book.id,
     });
@@ -216,11 +216,28 @@ export async function retrieveRelevantContext(
   // Sort descending by score
   scoredChunks.sort((a, b) => b.score - a.score);
 
-  // Take top chunks that pass relevance threshold (>= 0.40)
+  // Take top chunks from the hybrid search
   const topChunks = scoredChunks
-    .filter((s) => s.score >= 0.40 || (selectedText && s.score >= 0.25))
     .slice(0, 5)
     .map((s) => s.chunk);
+
+  if (topChunks.length === 0 && book.pages && book.pages.length > 0) {
+    const activePage = book.pages.find((p) => p.pageNumber === activePageNumber) || book.pages[0];
+    if (activePage) {
+      topChunks.push({
+        id: `chunk-page-${activePage.pageNumber}`,
+        bookId: book.id,
+        pageId: activePage.id || null,
+        chapterId: null,
+        chapterTitle: activePage.chapterTitle || null,
+        sectionId: null,
+        sectionTitle: activePage.sectionTitle || null,
+        pageNumber: activePage.pageNumber,
+        text: (activePage.content || `Material for ${book.title}`).slice(0, 800),
+        keyTerms: [],
+      });
+    }
+  }
 
   // Grounded citations referencing real retrieved textbook chunks
   const citations: Citation[] = topChunks.map((chunk) => ({

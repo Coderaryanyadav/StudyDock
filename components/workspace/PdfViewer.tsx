@@ -286,11 +286,14 @@ export const PdfViewer: React.FC<PdfViewerProps> = React.memo(({
           style={{ width: `${pageDimensions.width}px`, height: `${pageDimensions.height}px` }}
         >
           {pageHighlights.map((hl) => {
-            const colorMap = {
+            const colorMap: Record<Highlight["color"], string> = {
               yellow: "bg-yellow-400/40 border-b-2 border-yellow-400/90",
               blue: "bg-cyan-400/40 border-b-2 border-cyan-400/90",
               green: "bg-emerald-400/40 border-b-2 border-emerald-400/90",
               pink: "bg-pink-400/40 border-b-2 border-pink-400/90",
+              rose: "bg-rose-400/40 border-b-2 border-rose-400/90",
+              purple: "bg-purple-400/40 border-b-2 border-purple-400/90",
+              orange: "bg-orange-400/40 border-b-2 border-orange-400/90",
             };
             const colorClass = colorMap[hl.color] || colorMap.yellow;
 

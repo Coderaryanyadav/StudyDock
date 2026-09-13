@@ -8,20 +8,28 @@ interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
   onAuthSuccess?: (email: string) => void;
+  initialMode?: "signin" | "signup";
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
   onClose,
   onAuthSuccess,
+  initialMode = "signin",
 }) => {
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup">(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const emailInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setMode(initialMode);
+    }
+  }, [isOpen, initialMode]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -67,10 +75,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           password,
         });
         if (signUpErr) throw signUpErr;
-        if (data.session) {
+        if (data.session || data.user) {
           setSuccessMsg("Welcome to StudyDock!");
           if (onAuthSuccess) onAuthSuccess(data.user?.email || email);
-          setTimeout(onClose, 500);
+          setTimeout(onClose, 300);
         } else {
           setSuccessMsg("Account created! You can now sign in.");
         }
@@ -82,7 +90,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         if (signInErr) throw signInErr;
         setSuccessMsg("Welcome back to StudyDock!");
         if (onAuthSuccess) onAuthSuccess(data.user?.email || email);
-        setTimeout(onClose, 500);
+        setTimeout(onClose, 300);
       }
     } catch (err: any) {
       setError(err?.message || "Authentication failed. Please check your credentials.");

@@ -12,11 +12,11 @@ import { z } from "zod";
 export const runtime = "nodejs";
 
 const flashcardsGetSchema = z.object({
-  bookId: z.string().string().min(1, "Invalid book ID format"),
+  bookId: z.string().min(1, "Invalid book ID format"),
 });
 
 const flashcardsPostSchema = z.object({
-  flashcardId: z.string().string().min(1, "Invalid flashcard ID format"),
+  flashcardId: z.string().min(1, "Invalid flashcard ID format"),
   status: z.enum(["learning", "mastered"]),
 });
 

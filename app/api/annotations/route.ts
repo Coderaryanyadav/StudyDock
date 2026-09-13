@@ -17,16 +17,16 @@ import { z } from "zod";
 export const runtime = "nodejs";
 
 const getAnnotationsSchema = z.object({
-  bookId: z.string().string().min(1, "Invalid book ID format"),
+  bookId: z.string().min(1, "Invalid book ID format"),
 });
 
 const postAnnotationSchema = z.object({
-  type: z.enum(["bookmark", "highlight"]),
-  bookId: z.string().string().min(1, "Invalid book ID format"),
+  type: z.enum(["bookmark", "highlight"]).optional().default("highlight"),
+  bookId: z.string().min(1, "Invalid book ID format"),
   pageNumber: z.number().int().min(1).optional(),
   selectedText: z.string().max(10000).optional(),
   text: z.string().max(10000).optional(),
-  color: z.string().max(20).optional(),
+  color: z.enum(["yellow", "blue", "green", "pink", "rose", "purple", "orange"]).optional(),
   note: z.string().max(10000).optional(),
   title: z.string().max(255).optional(),
   boundingRect: z.any().optional(),
@@ -35,17 +35,17 @@ const postAnnotationSchema = z.object({
 });
 
 const patchAnnotationSchema = z.object({
-  id: z.string().string().min(1, "Invalid annotation ID format"),
+  id: z.string().min(1, "Invalid annotation ID format"),
   type: z.enum(["bookmark", "highlight"]).optional(),
-  color: z.string().max(20).optional(),
+  color: z.enum(["yellow", "blue", "green", "pink", "rose", "purple", "orange"]).optional(),
   note: z.string().max(10000).optional(),
   title: z.string().max(255).optional(),
 });
 
 const deleteAnnotationSchema = z.object({
-  id: z.string().string().min(1, "Invalid annotation ID format").optional(),
+  id: z.string().min(1, "Invalid annotation ID format").optional(),
   type: z.enum(["bookmark", "highlight"]).optional(),
-  bookId: z.string().string().min(1, "Invalid book ID format").optional(),
+  bookId: z.string().min(1, "Invalid book ID format").optional(),
   pageNumber: z.union([z.number(), z.string()]).optional(),
 });
 

@@ -15,6 +15,8 @@ import {
   LogOut,
   Library,
   GraduationCap,
+  UserPlus,
+  LogIn,
 } from "lucide-react";
 import { Book } from "@/types";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -30,8 +32,9 @@ interface WorkspaceNavbarProps {
   onOpenQuizModal: () => void;
   onOpenFlashcardsModal: () => void;
   onOpenCommandPalette: () => void;
-  onOpenAuthModal: () => void;
-  onResetDemo: () => void;
+  onOpenAuthModal: (mode?: "signin" | "signup") => void;
+  onResetDemo?: () => void;
+  isAuthenticated?: boolean;
 }
 
 export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
@@ -46,6 +49,7 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
   onOpenFlashcardsModal,
   onOpenCommandPalette,
   onOpenAuthModal,
+  isAuthenticated = false,
 }) => {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [showUserMenu, setShowUserMenu] = useState<boolean>(false);
@@ -57,6 +61,8 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
       supabase.auth.getSession().then(({ data }) => {
         if (data.session?.user?.email) {
           setUserEmail(data.session.user.email);
+        } else {
+          setUserEmail(null);
         }
       });
 
@@ -79,13 +85,15 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
     setShowUserMenu(false);
   };
 
+  const isUserAuthenticated = isAuthenticated || !!userEmail;
+
   return (
     <header className="h-13 bg-[#0a0e17] border-b border-slate-800/90 px-4 md:px-6 flex items-center justify-between z-30 shrink-0 select-none text-slate-200">
       
       {/* Left: Brand & Breadcrumb */}
       <div className="flex items-center gap-4 overflow-hidden">
         <button
-          onClick={() => onViewChange("landing")}
+          onClick={() => isUserAuthenticated ? onViewChange("landing") : onOpenAuthModal("signin")}
           aria-label="StudyDock Home"
           className="flex items-center gap-2.5 text-left group shrink-0 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none rounded-md p-1"
         >
@@ -99,8 +107,8 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
           </div>
         </button>
 
-        {/* Workspace Active Textbook Breadcrumb */}
-        {currentView === "workspace" && activeBook && (
+        {/* Workspace Active Textbook Breadcrumb (Authenticated Only) */}
+        {isUserAuthenticated && currentView === "workspace" && activeBook && (
           <div className="hidden lg:flex items-center gap-2 pl-4 border-l border-slate-800 text-xs text-slate-400">
             <span data-testid="nav-active-book-title" className="text-slate-300 font-medium truncate max-w-[160px]">
               {activeBook.title}
@@ -117,128 +125,136 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
         )}
       </div>
 
-      {/* Center: Clean View Switcher Navigation */}
-      <nav className="flex items-center bg-[#060910] p-1 rounded-lg border border-slate-800/80 text-xs font-medium" aria-label="Main Navigation">
-        <button
-          onClick={() => onViewChange("workspace")}
-          aria-label="Workspace View"
-          data-testid="nav-workspace-btn"
-          aria-current={currentView === "workspace" ? "page" : undefined}
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-md transition-all focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none ${
-            currentView === "workspace"
-              ? "bg-indigo-600 text-white shadow-sm"
-              : "text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          <BookOpen className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Workspace</span>
-        </button>
+      {/* Center: View Switcher (Authenticated Only) */}
+      {isUserAuthenticated ? (
+        <nav className="flex items-center bg-[#060910] p-1 rounded-lg border border-slate-800/80 text-xs font-medium" aria-label="Main Navigation">
+          <button
+            onClick={() => onViewChange("workspace")}
+            aria-label="Workspace View"
+            data-testid="nav-workspace-btn"
+            aria-current={currentView === "workspace" ? "page" : undefined}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-md transition-all focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none ${
+              currentView === "workspace"
+                ? "bg-indigo-600 text-white shadow-sm"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Workspace</span>
+          </button>
 
-        <button
-          onClick={() => onViewChange("dashboard")}
-          aria-label="Dashboard View"
-          data-testid="nav-dashboard-btn"
-          aria-current={currentView === "dashboard" ? "page" : undefined}
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-md transition-all focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none ${
-            currentView === "dashboard"
-              ? "bg-indigo-600 text-white shadow-sm"
-              : "text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          <LayoutDashboard className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Dashboard</span>
-        </button>
+          <button
+            onClick={() => onViewChange("dashboard")}
+            aria-label="Dashboard View"
+            data-testid="nav-dashboard-btn"
+            aria-current={currentView === "dashboard" ? "page" : undefined}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-md transition-all focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none ${
+              currentView === "dashboard"
+                ? "bg-indigo-600 text-white shadow-sm"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <LayoutDashboard className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Dashboard</span>
+          </button>
 
-        <button
-          onClick={() => onViewChange("landing")}
-          aria-label="Overview View"
-          data-testid="nav-overview-btn"
-          aria-current={currentView === "landing" ? "page" : undefined}
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-md transition-all focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none ${
-            currentView === "landing"
-              ? "bg-indigo-600 text-white shadow-sm"
-              : "text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          <Sparkles className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Overview</span>
-        </button>
-      </nav>
+          <button
+            onClick={() => onViewChange("landing")}
+            aria-label="Overview View"
+            data-testid="nav-overview-btn"
+            aria-current={currentView === "landing" ? "page" : undefined}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-md transition-all focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none ${
+              currentView === "landing"
+                ? "bg-indigo-600 text-white shadow-sm"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Overview</span>
+          </button>
+        </nav>
+      ) : (
+        <div className="hidden md:flex items-center gap-2 text-xs text-slate-400">
+          <span className="px-2.5 py-1 rounded-full bg-slate-900 border border-slate-800 text-slate-400">
+            Private Academic Workspace
+          </span>
+        </div>
+      )}
 
       {/* Right: Actions, Library & Auth */}
       <div className="flex items-center gap-2">
-        {/* Command Search Shortcut */}
-        <button
-          onClick={onOpenCommandPalette}
-          aria-label="Open Command Palette Search (Cmd+K)"
-          data-testid="nav-command-search-btn"
-          className="hidden md:flex items-center gap-2 px-2.5 py-1 rounded-md bg-slate-900/90 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-slate-200 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
-          title="Search anything (⌘K)"
-        >
-          <Search className="w-3.5 h-3.5" />
-          <span className="hidden lg:inline">Search</span>
-          <kbd className="text-[10px] font-mono bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 border border-slate-700">
-            ⌘K
-          </kbd>
-        </button>
+        {isUserAuthenticated ? (
+          <>
+            {/* Command Search Shortcut */}
+            <button
+              onClick={onOpenCommandPalette}
+              aria-label="Open Command Palette Search (Cmd+K)"
+              data-testid="nav-command-search-btn"
+              className="hidden md:flex items-center gap-2 px-2.5 py-1 rounded-md bg-slate-900/90 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-slate-200 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
+              title="Search anything (⌘K)"
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span className="hidden lg:inline">Search</span>
+              <kbd className="text-[10px] font-mono bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 border border-slate-700">
+                ⌘K
+              </kbd>
+            </button>
 
-        {/* Library Modal Trigger */}
-        <button
-          onClick={onOpenLibraryModal}
-          aria-label="Open Academic Library"
-          data-testid="nav-library-btn"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900/90 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
-        >
-          <Library className="w-3.5 h-3.5 text-indigo-400" />
-          <span className="hidden sm:inline">My Library</span>
-        </button>
+            {/* Library Modal Trigger */}
+            <button
+              onClick={onOpenLibraryModal}
+              aria-label="Open Academic Library"
+              data-testid="nav-library-btn"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900/90 hover:bg-slate-800 border border-slate-800 text-slate-200 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
+            >
+              <Library className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden sm:inline">My Library</span>
+            </button>
 
-        {/* Import PDF Trigger */}
-        <button
-          onClick={onOpenUploadModal}
-          aria-label="Import Textbook PDF"
-          data-testid="nav-import-btn"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
-        >
-          <Upload className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Import Book</span>
-        </button>
+            {/* Import PDF Trigger */}
+            <button
+              onClick={onOpenUploadModal}
+              aria-label="Import Textbook PDF"
+              data-testid="nav-import-btn"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Import Book</span>
+            </button>
 
-        {/* Study Tools (Quiz / Flashcards / Shortcuts) */}
-        <div className="hidden sm:flex items-center gap-1 pl-1 border-l border-slate-800 text-slate-400">
-          <button
-            onClick={onOpenQuizModal}
-            aria-label="Open Practice Quiz"
-            data-testid="nav-quiz-btn"
-            className="p-1.5 rounded-md hover:bg-slate-800 hover:text-slate-200 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
-            title="Practice Quiz"
-          >
-            <HelpCircle className="w-4 h-4" />
-          </button>
-          <button
-            onClick={onOpenFlashcardsModal}
-            aria-label="Review Study Flashcards"
-            data-testid="nav-flashcards-btn"
-            className="p-1.5 rounded-md hover:bg-slate-800 hover:text-slate-200 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
-            title="Review Flashcards"
-          >
-            <Layers className="w-4 h-4" />
-          </button>
-          <button
-            onClick={onOpenShortcutsModal}
-            aria-label="View Keyboard Shortcuts"
-            data-testid="nav-shortcuts-btn"
-            className="p-1.5 rounded-md hover:bg-slate-800 hover:text-slate-200 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
-            title="Keyboard Shortcuts (?)"
-          >
-            <Keyboard className="w-4 h-4" />
-          </button>
-        </div>
+            {/* Study Tools (Quiz / Flashcards / Shortcuts) */}
+            <div className="hidden sm:flex items-center gap-1 pl-1 border-l border-slate-800 text-slate-400">
+              <button
+                onClick={onOpenQuizModal}
+                aria-label="Open Practice Quiz"
+                data-testid="nav-quiz-btn"
+                className="p-1.5 rounded-md hover:bg-slate-800 hover:text-slate-200 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
+                title="Practice Quiz"
+              >
+                <HelpCircle className="w-4 h-4" />
+              </button>
+              <button
+                onClick={onOpenFlashcardsModal}
+                aria-label="Review Study Flashcards"
+                data-testid="nav-flashcards-btn"
+                className="p-1.5 rounded-md hover:bg-slate-800 hover:text-slate-200 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
+                title="Review Flashcards"
+              >
+                <Layers className="w-4 h-4" />
+              </button>
+              <button
+                onClick={onOpenShortcutsModal}
+                aria-label="View Keyboard Shortcuts"
+                data-testid="nav-shortcuts-btn"
+                className="p-1.5 rounded-md hover:bg-slate-800 hover:text-slate-200 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
+                title="Keyboard Shortcuts (?)"
+              >
+                <Keyboard className="w-4 h-4" />
+              </button>
+            </div>
 
-        {/* Auth / User Profile */}
-        <div className="relative pl-1">
-          {userEmail ? (
-            <div className="relative">
+            {/* User Profile Menu */}
+            <div className="relative pl-1">
               <button
                 onClick={() => setShowUserMenu(!showUserMenu)}
                 aria-label="User profile menu"
@@ -247,7 +263,7 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
                 className="flex items-center gap-2 p-1.5 rounded-md hover:bg-slate-800 border border-slate-800 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
               >
                 <div data-testid="nav-user-email" className="w-6 h-6 rounded bg-indigo-600/30 text-indigo-300 font-bold text-xs flex items-center justify-center border border-indigo-500/30">
-                  {userEmail[0].toUpperCase()}
+                  {userEmail ? userEmail[0].toUpperCase() : "U"}
                 </div>
               </button>
 
@@ -269,20 +285,32 @@ export const WorkspaceNavbar: React.FC<WorkspaceNavbarProps> = ({
                 </div>
               )}
             </div>
-          ) : (
+          </>
+        ) : (
+          /* Unauthenticated State Actions: Sign In & Create Account */
+          <div className="flex items-center gap-2">
             <button
-              onClick={onOpenAuthModal}
-              aria-label="Sign In or Create Account"
+              onClick={() => onOpenAuthModal("signin")}
+              aria-label="Sign In"
               data-testid="nav-sign-in-btn"
-              className="px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-colors flex items-center gap-1.5 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
+              className="px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition-colors flex items-center gap-1.5 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
             >
-              <User className="w-3.5 h-3.5" />
+              <LogIn className="w-3.5 h-3.5" />
               <span>Sign In</span>
             </button>
-          )}
-        </div>
-
+            <button
+              onClick={() => onOpenAuthModal("signup")}
+              aria-label="Create Account"
+              data-testid="nav-create-account-btn"
+              className="hidden sm:flex px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-colors items-center gap-1.5 focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
+            >
+              <UserPlus className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Create Account</span>
+            </button>
+          </div>
+        )}
       </div>
+
     </header>
   );
 };

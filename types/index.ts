@@ -109,7 +109,7 @@ export interface Highlight {
   bookId: string;
   pageNumber: number;
   text: string;
-  color: "yellow" | "blue" | "green" | "pink";
+  color: "yellow" | "blue" | "green" | "pink" | "rose" | "purple" | "orange";
   createdAt: string;
   updatedAt?: string;
   note?: string;

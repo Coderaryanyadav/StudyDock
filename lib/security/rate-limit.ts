@@ -78,8 +78,8 @@ export function validateChatInput(body: any): { isValid: boolean; error?: string
     return { isValid: false, error: "Question cannot be empty." };
   }
 
-  if (body.action !== "create_conversation" && (!body.bookId || typeof body.bookId !== "string" || !body.bookId.trim())) {
-    return { isValid: false, error: "Book ID is required for AI Tutor queries." };
+  if (body.bookId !== undefined && (typeof body.bookId !== "string" || !body.bookId.trim())) {
+    return { isValid: false, error: "Invalid book ID format." };
   }
 
   if (queryText.length > 2000) {

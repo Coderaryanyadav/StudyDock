@@ -24,11 +24,11 @@ const VALID_EVENT_TYPES = [
 const eventsPostSchema = z.object({
   action: z.enum(["start_session", "heartbeat_session", "end_session"]).optional(),
   eventType: z.enum(VALID_EVENT_TYPES).optional(),
-  bookId: z.string().string().min(1, "Invalid book ID format").optional().nullable(),
-  sessionId: z.string().string().min(1, "Invalid session ID format").optional(),
+  bookId: z.string().min(1, "Invalid book ID format").optional().nullable(),
+  sessionId: z.string().min(1, "Invalid session ID format").optional(),
   pageNumber: z.union([z.number(), z.string()]).optional().nullable(),
   durationSeconds: z.union([z.number(), z.string()]).optional(),
-  metadata: z.record(z.any()).optional(),
+  metadata: z.record(z.string(), z.any()).optional(),
   activityType: z.string().max(100).optional(),
 });
 

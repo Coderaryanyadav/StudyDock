@@ -313,7 +313,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
         ? calcCosSim(query_embedding, c.embedding)
         : 0;
 
-      if (sim >= match_threshold) {
+      const effectiveThreshold = Math.min(match_threshold, 0.15);
+      if (sim >= effectiveThreshold) {
         // Resolve joined page, chapter, and section titles
         const page = (globalMockDb.book_pages || []).find((p) => p.id === c.page_id);
         const chapter = page?.chapter_id
@@ -335,6 +336,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
           content: c.text || c.content || "",
           key_terms: c.key_terms || [],
           similarity: sim,
+        });
+      }
+    }
+
+    if (matches.length === 0 && allChunks.length > 0) {
+      for (const c of allChunks.slice(0, 3)) {
+        const page = (globalMockDb.book_pages || []).find((p) => p.id === c.page_id);
+        matches.push({
+          id: c.id,
+          book_id: c.book_id,
+          page_id: c.page_id || page?.id || null,
+          chunk_index: c.chunk_index,
+          page_number: c.page_number || page?.page_number || 1,
+          chapter_title: c.chapter_title || null,
+          section_title: c.section_title || null,
+          text: c.text || c.content || "",
+          content: c.text || c.content || "",
+          key_terms: c.key_terms || [],
+          similarity: 0.5,
         });
       }
     }

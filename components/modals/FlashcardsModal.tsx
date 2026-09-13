@@ -32,6 +32,16 @@ export const FlashcardsModal: React.FC<FlashcardsModalProps> = ({
     setIsFlipped(false);
   }, [flashcards]);
 
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    if (isOpen) {
+      window.addEventListener("keydown", handleKeyDown);
+    }
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen || cards.length === 0) return null;
 
   const currentCard = cards[currentIndex] || cards[0];
@@ -67,17 +77,23 @@ export const FlashcardsModal: React.FC<FlashcardsModalProps> = ({
   };
 
   return (
-    <div data-testid="flashcards-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="w-full max-w-xl bg-[#0d131f] border border-slate-800 rounded-xl p-6 md:p-8 shadow-2xl space-y-6 text-slate-100">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="flashcards-modal-title"
+      data-testid="flashcards-modal"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150"
+    >
+      <div className="w-full max-w-xl bg-[#0d131f] border border-slate-800 rounded-xl p-6 md:p-8 shadow-2xl space-y-6 text-slate-100 relative">
         
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
+            <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
               <Layers className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-white">Study Flashcards</h3>
+              <h3 id="flashcards-modal-title" className="font-bold text-base text-white">Study Flashcards</h3>
               <p className="text-xs text-slate-400">
                 {bookTitle ? `${bookTitle} ${pageNumber ? `• Page ${pageNumber}` : ""}` : chapterTitle || "Course Flashcards"}
               </p>
@@ -87,7 +103,7 @@ export const FlashcardsModal: React.FC<FlashcardsModalProps> = ({
             onClick={onClose}
             aria-label="Close Flashcards"
             data-testid="flashcard-close-btn"
-            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
           >
             <X className="w-5 h-5" />
           </button>

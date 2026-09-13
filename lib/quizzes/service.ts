@@ -297,7 +297,7 @@ export async function submitQuizAttempt(
       const updatedCorrect = prevCorrect + calculatedScore;
       const calculatedMastery = updatedAttempted > 0
         ? Math.min(100, Math.max(0, Math.round((updatedCorrect / updatedAttempted) * 100)))
-        : 50;
+        : 0;
 
       const isWeak = calculatedMastery < 60;
 

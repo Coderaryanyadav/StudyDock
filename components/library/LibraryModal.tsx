@@ -95,6 +95,16 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
     }
   };
 
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    if (isOpen) {
+      window.addEventListener("keydown", handleKeyDown);
+    }
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const filteredBooks = books.filter((b) =>
@@ -106,7 +116,12 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="library-modal-title"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150"
+    >
       <div className="w-full max-w-3xl bg-[#0d131f] border border-slate-800 rounded-xl p-6 md:p-8 shadow-2xl space-y-5 text-slate-100 max-h-[85vh] flex flex-col">
         
         {/* Modal Header */}
@@ -116,7 +131,7 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
               <BookOpen className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-white">Academic Library</h3>
+              <h3 id="library-modal-title" className="font-bold text-base text-white">Academic Library</h3>
               <p className="text-xs text-slate-400">Your personal cloud collection of textbooks and study indexes</p>
             </div>
           </div>
@@ -127,7 +142,8 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
                 onClose();
                 onOpenUploadModal();
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition-colors"
+              aria-label="Import new textbook"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Import Book</span>
@@ -135,7 +151,8 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
             
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              aria-label="Close academic library dialog"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
             >
               <X className="w-5 h-5" />
             </button>

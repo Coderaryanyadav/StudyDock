@@ -54,6 +54,16 @@ export const QuizModal: React.FC<QuizModalProps> = ({
     }
   }, [isOpen]);
 
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    if (isOpen) {
+      window.addEventListener("keydown", handleKeyDown);
+    }
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const currentQuestion = questions[currentIndex] || questions[0];
@@ -113,7 +123,13 @@ export const QuizModal: React.FC<QuizModalProps> = ({
   };
 
   return (
-    <div data-testid="quiz-modal" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="quiz-modal-title"
+      data-testid="quiz-modal"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150"
+    >
       <div className="w-full max-w-xl bg-[#0d131f] border border-slate-800 rounded-xl p-6 md:p-8 shadow-2xl space-y-6 text-slate-100 relative">
         
         {/* Header */}
@@ -123,7 +139,7 @@ export const QuizModal: React.FC<QuizModalProps> = ({
               <HelpCircle className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-white">Academic Practice Quiz</h3>
+              <h3 id="quiz-modal-title" className="font-bold text-base text-white">Academic Practice Quiz</h3>
               <p className="text-xs text-slate-400">
                 {bookTitle || "Textbook"} • Page {pageNumber || 1}
               </p>
@@ -133,7 +149,7 @@ export const QuizModal: React.FC<QuizModalProps> = ({
             onClick={onClose}
             aria-label="Close Quiz"
             data-testid="quiz-close-btn"
-            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
           >
             <X className="w-5 h-5" />
           </button>

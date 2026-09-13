@@ -288,13 +288,14 @@ export async function getProgressForUser(userId: string): Promise<StudentProgres
     streakDays: 0,
     longestStreakDays: 0,
     chaptersCompleted: 0,
+    totalChapters: 0,
     videosWatched: 0,
     quizzesCompleted: 0,
     questionsAsked: 0,
     flashcardsReviewed: 0,
     pagesRead: 0,
     bookProgressPercentage: 0,
-    activeSubject: "Computer Science",
+    activeSubject: "",
     concepts: [],
     todayPlan: [],
     recentActivity: [],
@@ -418,6 +419,7 @@ export async function getProgressForUser(userId: string): Promise<StudentProgres
 
     let pagesRead = 0;
     let chaptersCompleted = 0;
+    let totalChapters = 0;
     let bookProgressPercentage = 0;
 
     if (latestBook) {
@@ -455,6 +457,7 @@ export async function getProgressForUser(userId: string): Promise<StudentProgres
         .eq("book_id", latestBook.id);
 
       if (chapters && chapters.length > 0) {
+        totalChapters = chapters.length;
         for (const ch of chapters) {
           const start = ch.start_page;
           const end = ch.end_page;
@@ -472,22 +475,31 @@ export async function getProgressForUser(userId: string): Promise<StudentProgres
           }
         }
       } else {
-        // No chapters defined in database -> 0 chapters completed
         chaptersCompleted = 0;
+        totalChapters = 0;
       }
     }
 
-    const concepts = (conceptsData || []).map((c: any) => ({
-      id: c.id,
-      name: c.concepts?.name || c.name || "Academic Concept",
-      category: c.concepts?.category || c.category || "General Studies",
-      masteryPercentage: c.mastery_percentage ?? 50,
-      questionsAttempted: c.questions_attempted || 0,
-      questionsCorrect: c.questions_correct || 0,
-      isWeak: Boolean(c.is_weak || (c.mastery_percentage ?? 50) < 60),
-      recommendedChapter: c.recommended_chapter || "Chapter 1",
-      recommendedPage: c.recommended_page || 1,
-    }));
+    const concepts = (conceptsData || []).map((c: any) => {
+      const attempted = c.questions_attempted || 0;
+      const correct = c.questions_correct || 0;
+      const calculatedMastery = attempted > 0
+        ? Math.min(100, Math.max(0, Math.round((correct / attempted) * 100)))
+        : (typeof c.mastery_percentage === "number" ? c.mastery_percentage : 0);
+      const isWeak = attempted > 0 ? (calculatedMastery < 60) : false;
+
+      return {
+        id: c.id,
+        name: c.concepts?.name || c.name || "Academic Concept",
+        category: c.concepts?.category || c.category || "General Studies",
+        masteryPercentage: calculatedMastery,
+        questionsAttempted: attempted,
+        questionsCorrect: correct,
+        isWeak: Boolean(c.is_weak !== undefined ? c.is_weak : isWeak),
+        recommendedChapter: c.recommended_chapter || "Chapter 1",
+        recommendedPage: c.recommended_page || 1,
+      };
+    });
 
     // Dynamic Study Plan based on current book and weak concepts
     const todayPlan: StudyPlanItem[] = [];
@@ -502,7 +514,7 @@ export async function getProgressForUser(userId: string): Promise<StudentProgres
       });
     }
 
-    const weakConcept = concepts.find((c) => c.isWeak || c.masteryPercentage < 60);
+    const weakConcept = concepts.find((c) => c.isWeak && c.questionsAttempted > 0);
     if (weakConcept) {
       todayPlan.push({
         id: "plan-weak-review",
@@ -514,14 +526,16 @@ export async function getProgressForUser(userId: string): Promise<StudentProgres
       });
     }
 
-    todayPlan.push({
-      id: "plan-flashcards",
-      title: "Daily Flashcard Retention Practice",
-      type: "flashcards",
-      target: "High-yield active recall deck",
-      completed: false,
-      estimatedMinutes: 10,
-    });
+    if ((flashcardsCount || 0) > 0 || latestBook) {
+      todayPlan.push({
+        id: "plan-flashcards",
+        title: "Daily Flashcard Retention Practice",
+        type: "flashcards",
+        target: "High-yield active recall deck",
+        completed: false,
+        estimatedMinutes: 10,
+      });
+    }
 
     // Format recent activity list from real tracking events
     const recentActivity = (events || []).slice(0, 10).map((ev) => {
@@ -581,13 +595,14 @@ export async function getProgressForUser(userId: string): Promise<StudentProgres
       streakDays: currentStreak,
       longestStreakDays: longestStreak,
       chaptersCompleted,
+      totalChapters,
       videosWatched: videoCount || 0,
       quizzesCompleted: quizCount || 0,
       questionsAsked: questionsAsked || 0,
       flashcardsReviewed: flashcardsCount || 0,
       pagesRead,
       bookProgressPercentage,
-      activeSubject: latestBook?.subject || "Computer Science",
+      activeSubject: latestBook?.subject || "",
       concepts,
       todayPlan,
       recentActivity,

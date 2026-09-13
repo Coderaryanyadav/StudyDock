@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
       targetContext = "The transport layer provides logical communication between application processes running on different hosts. Protocols include TCP and UDP.";
     }
 
-    let formattedQuestions: QuizQuestion[] = [];
+    const formattedQuestions: QuizQuestion[] = [];
     const apiKey = process.env.GEMINI_API_KEY;
 
     if (apiKey && apiKey !== "your_gemini_api_key_here") {

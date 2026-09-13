@@ -71,13 +71,14 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
           streakDays: progData.streakDays ?? 0,
           longestStreakDays: progData.longestStreakDays ?? 0,
           chaptersCompleted: progData.chaptersCompleted ?? 0,
+          totalChapters: progData.totalChapters ?? 0,
           videosWatched: progData.videosWatched ?? 0,
           quizzesCompleted: progData.quizzesCompleted ?? 0,
           questionsAsked: progData.questionsAsked ?? 0,
           flashcardsReviewed: progData.flashcardsReviewed ?? 0,
           pagesRead: progData.pagesRead ?? 0,
           bookProgressPercentage: progData.bookProgressPercentage ?? 0,
-          activeSubject: progData.activeSubject || "Computer Science",
+          activeSubject: progData.activeSubject || "",
           concepts: progData.concepts || [],
           todayPlan: progData.todayPlan || [],
           recentActivity: progData.recentActivity || [],
@@ -87,8 +88,8 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
           setTodayPlan(progData.todayPlan);
         }
 
-        if (progData.user?.displayName) {
-          setUserName(progData.user.displayName);
+        if (progData.user?.displayName || progData.user?.email) {
+          setUserName(progData.user.displayName || progData.user.email.split("@")[0]);
         }
       }
 
@@ -115,7 +116,9 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
     );
   };
 
-  const weakConcepts = (progress.concepts || []).filter((c) => c.isWeak || c.masteryPercentage < 60);
+  const weakConcepts = (progress.concepts || []).filter(
+    (c) => (c.isWeak || c.masteryPercentage < 60) && c.questionsAttempted > 0
+  );
   const activeBook = userBooks[0] || null;
 
   const formatStudyTime = (minutes: number) => {
@@ -204,7 +207,8 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
             ) : (
               <button
                 onClick={onOpenUpload}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition-all shadow-sm"
+                data-testid="empty-import-btn"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition-all shadow-sm focus-ring"
               >
                 <Plus className="w-4 h-4" />
                 <span>Import Textbook</span>
@@ -387,6 +391,14 @@ export const StudyDashboard: React.FC<StudyDashboardProps> = ({
                           className="h-full bg-indigo-500 rounded-full transition-all duration-300"
                         />
                       </div>
+                    </div>
+
+                    {/* Chapter Progress */}
+                    <div className="flex items-center justify-between text-xs text-slate-400 font-mono pt-0.5">
+                      <span>Chapter Progress</span>
+                      <span className="text-emerald-400 font-semibold">
+                        {progress.chaptersCompleted} {progress.chaptersCompleted === 1 ? "Chapter" : "Chapters"} Completed{progress.totalChapters ? ` of ${progress.totalChapters}` : ""}
+                      </span>
                     </div>
 
                     {/* Actions */}

@@ -318,6 +318,7 @@ export interface StudentProgress {
   streakDays: number;
   longestStreakDays?: number;
   chaptersCompleted: number;
+  totalChapters?: number;
   videosWatched: number;
   quizzesCompleted: number;
   questionsAsked: number;

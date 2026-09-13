@@ -9,6 +9,16 @@ interface ShortcutsModalProps {
 }
 
 export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose }) => {
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    if (isOpen) {
+      window.addEventListener("keydown", handleKeyDown);
+    }
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const shortcuts = [
@@ -23,7 +33,12 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="shortcuts-modal-title"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150"
+    >
       <div className="w-full max-w-md bg-[#0d131f] border border-slate-800 rounded-xl p-6 shadow-2xl space-y-5 text-slate-100">
         
         {/* Header */}
@@ -33,13 +48,14 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
               <Keyboard className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-white">Keyboard Shortcuts</h3>
+              <h3 id="shortcuts-modal-title" className="font-bold text-base text-white">Keyboard Shortcuts</h3>
               <p className="text-xs text-slate-400">Power commands for your study workspace</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            aria-label="Close keyboard shortcuts dialog"
+            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
           >
             <X className="w-5 h-5" />
           </button>

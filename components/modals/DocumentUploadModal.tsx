@@ -22,6 +22,15 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [processStep, setProcessStep] = useState<"idle" | "uploading" | "extracting" | "indexing" | "ready">("idle");
   const [error, setError] = useState<string>("");
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    if (isOpen) {
+      window.addEventListener("keydown", handleKeyDown);
+    }
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -75,7 +84,13 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
   };
 
   return (
-    <div data-testid="upload-modal-content" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="upload-modal-title"
+      data-testid="upload-modal-content"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150"
+    >
       <div className="w-full max-w-lg bg-[#0d131f] border border-slate-800 rounded-xl p-6 md:p-8 shadow-2xl space-y-5 text-slate-100">
         
         {/* Header */}
@@ -85,14 +100,15 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
               <Upload className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-white">Import Textbook PDF</h3>
+              <h3 id="upload-modal-title" className="font-bold text-base text-white">Import Textbook PDF</h3>
               <p className="text-xs text-slate-400">Upload your course textbook for private PDF viewing and vector RAG</p>
             </div>
           </div>
           <button
             onClick={onClose}
+            aria-label="Close upload dialog"
             data-testid="close-upload-modal-btn"
-            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:outline-none"
           >
             <X className="w-5 h-5" />
           </button>
@@ -104,7 +120,7 @@ export const DocumentUploadModal: React.FC<DocumentUploadModalProps> = ({
             <input
               type="file"
               accept=".pdf,application/pdf"
-              data-testid="document-file-input"
+              data-testid="pdf-dropzone-input"
               aria-label="Upload PDF document"
               onChange={handleFileChange}
               className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"

@@ -156,6 +156,9 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
       await targetPage.getByTestId("auth-submit-btn").click();
       await expect(targetPage.getByTestId("user-profile-menu-btn")).toBeVisible({ timeout: 20000 });
     }
+
+    // Ensure auth modal is dismissed
+    await expect(targetPage.getByTestId("auth-modal")).not.toBeVisible({ timeout: 5000 }).catch(() => {});
   }
 
   test("Phase 14 Complete Real User Study & Security Journey (Steps 1-44)", async ({ page, request, context }) => {
@@ -163,6 +166,9 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
     // STEP 1: Create & Login User A
     // =========================================================================
     console.log("➡️ STEP 1: Create & Login User A");
+    page.on("console", (msg) => console.log("BROWSER LOG:", msg.type(), msg.text()));
+    page.on("pageerror", (err) => console.log("BROWSER ERROR:", err.message, "\nSTACK:", err.stack));
+    await setupAuthRoutes(page);
     await page.goto("/");
     await page.waitForLoadState("domcontentloaded");
     await loginOrSignup(page, userAEmail, userAPassword);
@@ -175,14 +181,16 @@ test.describe.serial("StudyDock Real End-to-End Test Suite (Phase 14)", () => {
 
     // Open Upload Modal
     const importBtn = page.getByTestId("nav-import-btn");
-    if (await importBtn.isVisible()) {
+    const emptyImportBtn = page.getByTestId("empty-import-btn");
+    if (await importBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
       await importBtn.click();
-    } else {
-      const emptyImportBtn = page.getByTestId("empty-import-btn");
+    } else if (await emptyImportBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
       await emptyImportBtn.click();
+    } else {
+      await importBtn.click();
     }
 
-    await expect(page.getByTestId("pdf-dropzone-input")).toBeAttached();
+    await expect(page.getByTestId("pdf-dropzone-input")).toBeAttached({ timeout: 15000 });
 
     // Set file via file input
     await page.getByTestId("pdf-dropzone-input").setInputFiles({

@@ -60,7 +60,12 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     : [];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Command Palette and Search"
+      className="fixed inset-0 z-50 flex items-start justify-center pt-20 p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150"
+    >
       <div className="w-full max-w-2xl bg-[#0d131f] border border-slate-800 rounded-xl shadow-2xl overflow-hidden text-slate-100 divide-y divide-slate-800">
         
         {/* Search Header */}
